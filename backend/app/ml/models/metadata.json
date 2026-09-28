@@ -1,0 +1,119 @@
+{
+  "dataset": "data\\ml\\synthetic_security_events.csv",
+  "random_seed": 42,
+  "test_size": 0.2,
+  "samples": 15000,
+  "train_samples": 12000,
+  "test_samples": 3000,
+  "class_distribution": {
+    "malicious": 3812,
+    "normal": 9035,
+    "suspicious": 2153
+  },
+  "features": [
+    "failed_logins",
+    "event_risk_weight",
+    "is_privilege_escalation",
+    "is_powershell",
+    "is_lateral_movement",
+    "is_data_exfiltration",
+    "is_abnormal_process",
+    "is_usb_insertion",
+    "is_ssh_attempt",
+    "off_hours",
+    "high_volume",
+    "sensitive_resource",
+    "impossible_travel",
+    "anonymous_network",
+    "high_risk_geo",
+    "vpn_network",
+    "device_trust",
+    "location_risk"
+  ],
+  "models": {
+    "classifier": "RandomForestClassifier",
+    "anomaly_detector": "IsolationForest"
+  },
+  "accuracy": 0.8233,
+  "macro_precision": 0.755,
+  "macro_recall": 0.7728,
+  "macro_f1": 0.7567,
+  "roc_auc_ovr_macro": 0.928,
+  "classes": [
+    "malicious",
+    "normal",
+    "suspicious"
+  ],
+  "confusion_matrix": [
+    [
+      630,
+      2,
+      130
+    ],
+    [
+      1,
+      1572,
+      234
+    ],
+    [
+      71,
+      92,
+      268
+    ]
+  ],
+  "classification_report": {
+    "malicious": {
+      "precision": 0.8974358974358975,
+      "recall": 0.8267716535433071,
+      "f1-score": 0.860655737704918,
+      "support": 762.0
+    },
+    "normal": {
+      "precision": 0.943577430972389,
+      "recall": 0.8699501936912009,
+      "f1-score": 0.9052692196947884,
+      "support": 1807.0
+    },
+    "suspicious": {
+      "precision": 0.4240506329113924,
+      "recall": 0.6218097447795824,
+      "f1-score": 0.504233301975541,
+      "support": 431.0
+    },
+    "accuracy": 0.8233333333333334,
+    "macro avg": {
+      "precision": 0.755021320439893,
+      "recall": 0.7728438640046967,
+      "f1-score": 0.756719419791749,
+      "support": 3000.0
+    },
+    "weighted avg": {
+      "precision": 0.8572187981326903,
+      "recall": 0.8233333333333334,
+      "f1-score": 0.8363219017570294,
+      "support": 3000.0
+    }
+  },
+  "feature_importance": {
+    "failed_logins": 0.196034,
+    "event_risk_weight": 0.281922,
+    "is_privilege_escalation": 0.011751,
+    "is_powershell": 0.00881,
+    "is_lateral_movement": 0.010091,
+    "is_data_exfiltration": 0.006621,
+    "is_abnormal_process": 0.007203,
+    "is_usb_insertion": 0.006232,
+    "is_ssh_attempt": 0.010266,
+    "off_hours": 0.028312,
+    "high_volume": 0.045153,
+    "sensitive_resource": 0.074558,
+    "impossible_travel": 0.012731,
+    "anonymous_network": 0.019336,
+    "high_risk_geo": 0.005653,
+    "vpn_network": 0.008583,
+    "device_trust": 0.193418,
+    "location_risk": 0.073328
+  },
+  "model_file": "random_forest.joblib",
+  "anomaly_model_file": "isolation_forest.joblib"
+}

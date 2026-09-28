@@ -1,0 +1,1 @@
+Decision {{ decision|upper }} based on {{ elevated_count }} elevated factor(s):{% if reasons %} {{ reasons|join('; ') }}{% else %} no elevated factors{% endif %}.{% if ml %} ML class={{ ml.predicted_class }}, malicious probability={{ '%.1f'|format(ml.malicious_probability) }}%, anomaly score={{ '%.1f'|format(ml.anomaly_score) }}.{% endif %}

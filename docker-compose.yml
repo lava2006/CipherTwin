@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: ciphertwin-backend
+    environment:
+      DATABASE_URL: "sqlite:////data/ciphertwin.db"
+      ENABLE_SIMULATION: "true"
+      TELEMETRY_INTERVAL_SECONDS: "2.5"
+      SECRET_KEY: "change-me-in-production-please-make-this-long"
+      CORS_ORIGINS: "http://localhost,http://localhost:80,http://localhost:5173"
+    volumes:
+      - backend-data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: ciphertwin-neo4j
+    environment:
+      NEO4J_AUTH: "neo4j/ciphertwin"
+      NEO4J_PLUGINS: "[]"
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ciphertwin-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  neo4j-data:
+  neo4j-logs:
