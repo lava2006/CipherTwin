@@ -88,8 +88,8 @@ export default function ThreatsPage() {
         </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                  <Field label="Username" value={`${active.username ?? "â€”"}`} />
-                  <Field label="Source IP" value={`${active.ip_address ?? "â€”"}`} />
+                  <Field label="Username" value={`${active.username ?? "N/A"}`} />
+                  <Field label="Source IP" value={`${active.ip_address ?? "N/A"}`} />
                   <Field label="Risk Score" value={`${active.risk_score.toFixed(0)}`} />
                   <Field label="First Seen" value={`${formatDateTime(active.first_seen)}`} />
         </div>

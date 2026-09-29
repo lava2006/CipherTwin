@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn, formatNumber } from "@/lib/utils";
 
@@ -46,14 +47,19 @@ export function KpiCard({ label, value, hint, icon, accent = "cyan", trend }: Kp
           {trend && (
             <div
               className={cn(
-                "rounded-md px-1.5 py-0.5 text-[10px] font-medium",
+                "rounded-md px-1.5 py-0.5 text-[10px] font-medium inline-flex items-center gap-1",
                 trend.direction === "up"
                   ? "bg-emerald-500/15 text-emerald-300"
                   : "bg-red-500/15 text-red-300",
               )}
             >
-              {trend.direction === "up" ? "â–²" : "â–¼"} {trend.value}
-          </div>
+              {trend.direction === "up" ? (
+                <TrendingUp className="h-2.5 w-2.5" />
+              ) : (
+                <TrendingDown className="h-2.5 w-2.5" />
+              )}{" "}
+              {trend.value}
+            </div>
           )}
       </div>
     </CardContent>

@@ -18,6 +18,8 @@ class TelemetryEvent(Base):
     ip_address = Column(String, nullable=True)
     status = Column(String, default="success")  # success, failure, blocked
     risk_indicators = Column(Text, nullable=True)  # JSON array of strings
+    mitre_technique = Column(String, nullable=True, index=True)
+    mitre_tactic = Column(String, nullable=True)
     raw = Column(Text, nullable=True)  # JSON payload
     processed = Column(Integer, default=0)  # flag for risk engine
 
@@ -34,4 +36,6 @@ class TelemetryEvent(Base):
             "ip_address": self.ip_address,
             "status": self.status,
             "risk_indicators": _json.loads(self.risk_indicators) if self.risk_indicators else [],
+            "mitre_technique": self.mitre_technique,
+            "mitre_tactic": self.mitre_tactic,
         }

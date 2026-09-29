@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, Fingerprint, Plus, Terminal, Webhook } from "lucide-react";
+import { Eye, Fingerprint, Plus, Shield, Terminal, Webhook, Cpu, CheckCircle2 } from "lucide-react";
 import { usePolling } from "@/hooks/usePolling";
 import type { DecoySession, Honeytoken } from "@/lib/types";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -16,18 +16,35 @@ const ICONS: Record<string, JSX.Element> = {
   database: <Fingerprint className="h-4 w-4" />,
   web: <Webhook className="h-4 w-4" />,
   admin_panel: <Eye className="h-4 w-4" />,
+  api: <Cpu className="h-4 w-4" />,
 };
 
+interface FidelityStatus {
+  mode: string;
+  cowrie_enabled: boolean;
+  total_sessions: number;
+  fidelity_breakdown: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+}
+
 export default function DeceptionPage() {
-  const sessions = usePolling<DecoySession[]>("/deception/sessions", 6000);
-  const tokens = usePolling<Honeytoken[]>("/deception/honeytokens", 8000);
+  const sessions = usePolling<DecoySession[]>("/deception/sessions", 5000);
+  const tokens = usePolling<Honeytoken[]>("/deception/honeytokens", 6000);
+  const fidelityInfo = usePolling<FidelityStatus>("/deception/fidelity/status", 6000);
   const [active, setActive] = useState<DecoySession | null>(null);
   const { toast } = useToast();
 
   async function reseed() {
     try {
       await api.post("/deception/seed");
-      toast({ title: "Honeytokens planted", description: "Fake credentials and decoy files distributed.", variant: "success" });
+      toast({
+        title: "Honeytokens Planted",
+        description: "Credentials, API keys, decoy files, URLs, cookies, and DB records deployed.",
+        variant: "success",
+      });
     } catch {
       toast({ title: "Seed failed", variant: "error" });
     }
@@ -35,8 +52,12 @@ export default function DeceptionPage() {
 
   async function trigger(id: number) {
     try {
-      await api.post(`/deception/trigger/${id}`);
-      toast({ title: "Honeytoken triggered", description: "Attacker behaviour recorded.", variant: "warning" });
+      const res = await api.post(`/deception/trigger/${id}`);
+      toast({
+        title: "Critical Honeytoken Alert Triggered",
+        description: `Threat escalated to risk 95. Attacker automatically trapped in high-fidelity decoy.`,
+        variant: "error",
+      });
     } catch {
       toast({ title: "Trigger failed", variant: "error" });
     }
@@ -44,24 +65,64 @@ export default function DeceptionPage() {
 
   const list = sessions.data ?? [];
   const tokenList = tokens.data ?? [];
+  const fed = fidelityInfo.data;
 
   return (
     <div className="space-y-6">
       <SectionHeader
         title="Adaptive Deception Engine"
-        description="High-risk sessions are redirected into believable decoys. Honeytokens record every interaction."
+        description="Dynamic decoys with adaptive fidelity (LOW/MED/HIGH) based on attacker signals, paired with 6-factor honeytokens."
         actions={
-          <Button variant="cyber" size="sm" onClick={reseed}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Plant Honeytokens
-  </Button>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="font-mono text-xs">
+              Backend: {fed?.mode ?? "SIMULATED"}
+            </Badge>
+            <Button variant="cyber" size="sm" onClick={reseed}>
+              <Plus className="mr-1 h-3.5 w-3.5" /> Plant Honeytokens
+            </Button>
+          </div>
         }
       />
+
+      {/* Fidelity & Engine Posture Bar */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card className="border-border bg-card/40">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">Mode</div>
+            <div className="text-base font-bold text-cyber-cyan">{fed?.mode ?? "SIMULATED"}</div>
+            <div className="text-[11px] text-muted-foreground">
+              {fed?.cowrie_enabled ? "Cowrie Honeypot Active" : "Adaptive Synthetic Emulation"}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card/40">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">High Fidelity Traps</div>
+            <div className="text-base font-bold text-rose-400">{fed?.fidelity_breakdown.high ?? 0}</div>
+            <div className="text-[11px] text-muted-foreground">Deep interactive capture</div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card/40">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">Medium Fidelity</div>
+            <div className="text-base font-bold text-violet-400">{fed?.fidelity_breakdown.medium ?? 0}</div>
+            <div className="text-[11px] text-muted-foreground">Simulated service interaction</div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card/40">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">Low Fidelity</div>
+            <div className="text-base font-bold text-slate-300">{fed?.fidelity_breakdown.low ?? 0}</div>
+            <div className="text-[11px] text-muted-foreground">Banner & connection logging</div>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle>Active Decoy Sessions</CardTitle>
-   </CardHeader>
+          </CardHeader>
           <CardContent className="space-y-2">
             {sessions.loading && !list.length ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)
@@ -70,78 +131,147 @@ export default function DeceptionPage() {
                 <button
                   key={s.id}
                   onClick={() => setActive(s)}
-                  className={`w-full text-left rounded-lg border p-3 transition-colors ${active?.id === s.id ? "border-cyber-violet/40 bg-violet-500/10" : "border-border bg-card/40 hover:bg-muted/30"}`}
+                  className={`w-full text-left rounded-lg border p-3 transition-colors ${
+                    active?.id === s.id
+                      ? "border-cyber-violet/40 bg-violet-500/10"
+                      : "border-border bg-card/40 hover:bg-muted/30"
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-md bg-violet-500/20 text-violet-300">
                       {ICONS[s.decoy_type] ?? <Eye className="h-4 w-4" />}
-          </div>
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold capitalize">{`${s.decoy_type.replace("_", " ")} Decoy`}</div>
-                      <div className="truncate text-xs text-muted-foreground">{`Actor: ${s.actor ?? "â€”"} â€¢ IP ${s.source_ip ?? "â€”"}`}</div>
-        </div>
-                    <Badge variant="violet">{`${formatDateTime(s.timestamp)}`}</Badge>
-      </div>
-        </button>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold capitalize">
+                          {s.decoy_type.replace("_", " ")} Decoy
+                        </span>
+                        <Badge
+                          variant={
+                            s.fidelity === "HIGH"
+                              ? "danger"
+                              : s.fidelity === "LOW"
+                              ? "outline"
+                              : "violet"
+                          }
+                          className="text-[10px]"
+                        >
+                          {s.fidelity || "MEDIUM"} FIDELITY
+                        </Badge>
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {s.persona ? `${s.persona} | ` : ""}Actor: {s.actor ?? "N/A"} | IP: {s.source_ip ?? "N/A"}
+                      </div>
+                    </div>
+                    <Badge variant="violet">{formatDateTime(s.timestamp)}</Badge>
+                  </div>
+                </button>
               ))
             )}
             {list.length === 0 && (
-              <p className="text-sm text-muted-foreground">No decoy sessions yet. Risky traffic will be redirected here automatically</p>
+              <p className="text-sm text-muted-foreground">
+                No decoy sessions yet. Risky traffic will be redirected here automatically.
+              </p>
             )}
-   </CardContent>
- </Card>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle>Session Detail</CardTitle>
-      </CardHeader>
+            <CardTitle>Session Detail & Signals</CardTitle>
+          </CardHeader>
           <CardContent>
             {active ? (
               <div className="space-y-4 text-sm">
                 <div className="rounded-md border border-violet-500/30 bg-violet-500/5 p-3">
-                  <div className="text-xs uppercase tracking-wider text-violet-300">Notes</div>
-                  <div>{`${active.notes}`}</div>
-        </div>
+                  <div className="text-xs uppercase tracking-wider text-violet-300">
+                    Adaptive Trigger Reason
+                  </div>
+                  <div className="text-xs mt-1">{active.reason || active.notes}</div>
+                  <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>Fidelity: {active.fidelity || "MEDIUM"}</span>
+                    <span>|</span>
+                    <span>Confidence: {((active.confidence ?? 0.85) * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+                {active.persona && (
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                      Active Honeypot Persona
+                    </div>
+                    <div className="rounded-md bg-muted/30 p-2 font-mono text-xs text-cyber-cyan">
+                      {active.persona}
+                    </div>
+                  </div>
+                )}
+                {active.banner && (
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                      Emulated Service Banner
+                    </div>
+                    <div className="rounded-md bg-muted/30 p-2 font-mono text-xs text-amber-300">
+                      {active.banner}
+                    </div>
+                  </div>
+                )}
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Credentials used</div>
-                  <div className="rounded-md bg-muted/30 p-2 font-mono text-xs">{`${active.credentials_used ?? "â€”"}`}</div>
-        </div>
+                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                    Credentials trapped
+                  </div>
+                  <div className="rounded-md bg-muted/30 p-2 font-mono text-xs">
+                    {active.credentials_used ?? "None recorded"}
+                  </div>
+                </div>
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Activity timeline</div>
+                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                    Activity timeline
+                  </div>
                   <ul className="space-y-1 text-xs">
                     {(active.activity ?? []).map((a, i) => (
-                      <li key={i} className="rounded bg-muted/30 px-2 py-1">{`${a}`}</li>
+                      <li key={i} className="rounded bg-muted/30 px-2 py-1">
+                        {a}
+                      </li>
                     ))}
-        </ul>
-        </div>
+                  </ul>
+                </div>
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Commands</div>
+                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                    Commands recorded
+                  </div>
                   <ul className="space-y-1 font-mono text-xs">
                     {(active.commands ?? []).map((c, i) => (
-                      <li key={i} className="rounded bg-muted/30 px-2 py-1 text-emerald-300">{`$ ${c}`}</li>
+                      <li key={i} className="rounded bg-muted/30 px-2 py-1 text-emerald-300">
+                        $ {c}
+                      </li>
                     ))}
-          </ul>
-        </div>
+                  </ul>
+                </div>
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Pages visited</div>
+                  <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
+                    Pages probed
+                  </div>
                   <ul className="space-y-1 font-mono text-xs">
                     {(active.pages ?? []).map((p, i) => (
-                      <li key={i} className="rounded bg-muted/30 px-2 py-1 text-cyan-300">{`GET ${p}`}</li>
+                      <li key={i} className="rounded bg-muted/30 px-2 py-1 text-cyan-300">
+                        GET {p}
+                      </li>
                     ))}
-          </ul>
-        </div>
-      </div>
+                  </ul>
+                </div>
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Select a decoy session to inspect what the attacker did</p>
+              <p className="text-sm text-muted-foreground">
+                Select a decoy session to inspect what the attacker did.
+              </p>
             )}
-  </CardContent>
-</Card>
-</div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle>Honeytokens</CardTitle>
-   </CardHeader>
+          <CardTitle>Honeytokens (Credentials, Keys, Files, URLs, Cookies, DB Records)</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -151,39 +281,43 @@ export default function DeceptionPage() {
                   <th className="px-3 py-2">Label</th>
                   <th className="px-3 py-2">Value</th>
                   <th className="px-3 py-2">Planted on</th>
-                  <th className="px-3 py-2">Triggered</th>
+                  <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Action</th>
-      </tr>
-    </thead>
+                </tr>
+              </thead>
               <tbody>
                 {tokenList.map((t) => (
                   <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20">
-                    <td className="px-3 py-2 capitalize">{`${t.token_type}`}</td>
-                    <td className="px-3 py-2 font-medium">{`${t.label}`}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{`${t.value}`}</td>
-                    <td className="px-3 py-2">{`${t.planted_on ?? "â€”"}`}</td>
+                    <td className="px-3 py-2 capitalize font-mono text-xs text-cyber-cyan">
+                      {t.token_type}
+                    </td>
+                    <td className="px-3 py-2 font-medium">{t.label}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{t.value}</td>
+                    <td className="px-3 py-2">{t.planted_on ?? "N/A"}</td>
                     <td className="px-3 py-2">
-                      <Badge variant={t.triggered ? "danger" : "outline"}>{`${t.triggered ? "Triggered" : "Armed"}`}</Badge>
-         </td>
+                      <Badge variant={t.triggered ? "danger" : "outline"}>
+                        {t.triggered ? "Triggered" : "Armed"}
+                      </Badge>
+                    </td>
                     <td className="px-3 py-2">
                       <Button size="sm" variant="outline" onClick={() => trigger(t.id)}>
                         Simulate trigger
-         </Button>
-         </td>
-       </tr>
+                      </Button>
+                    </td>
+                  </tr>
                 ))}
                 {tokenList.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">
                       No honeytokens yet. Click Plant Honeytokens to distribute.
-           </td>
-       </tr>
+                    </td>
+                  </tr>
                 )}
-    </tbody>
-  </table>
-</div>
-</CardContent>
-</Card>
-</div>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

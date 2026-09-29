@@ -1,0 +1,94 @@
+[
+  {
+    "n_units": 3,
+    "num_qubits": 9,
+    "p_layers": 2,
+    "iterations": 10,
+    "qaoa_time_s": 0.3088,
+    "qaoa_cost": 9.6,
+    "qaoa_valid": true,
+    "qaoa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 0
+    },
+    "sa_time_s": 0.0182,
+    "sa_cost": 9.6,
+    "sa_valid": true,
+    "sa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 0
+    },
+    "cost_diff": 0.0
+  },
+  {
+    "n_units": 5,
+    "num_qubits": 15,
+    "p_layers": 2,
+    "iterations": 10,
+    "qaoa_time_s": 0.8904,
+    "qaoa_cost": 15.68,
+    "qaoa_valid": true,
+    "qaoa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 2
+    },
+    "sa_time_s": 0.0308,
+    "sa_cost": 15.68,
+    "sa_valid": true,
+    "sa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 2
+    },
+    "cost_diff": 0.0
+  },
+  {
+    "n_units": 7,
+    "num_qubits": 21,
+    "p_layers": 2,
+    "iterations": 10,
+    "qaoa_time_s": 76.1815,
+    "qaoa_cost": 20.0,
+    "qaoa_valid": true,
+    "qaoa_counts": {
+      "allow": 4,
+      "restrict": 0,
+      "deny": 3
+    },
+    "sa_time_s": 0.0396,
+    "sa_cost": 17.92,
+    "sa_valid": true,
+    "sa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 4
+    },
+    "cost_diff": 2.08
+  },
+  {
+    "n_units": 8,
+    "num_qubits": 24,
+    "p_layers": 2,
+    "iterations": 10,
+    "qaoa_time_s": 743.7363,
+    "qaoa_cost": 24.32,
+    "qaoa_valid": true,
+    "qaoa_counts": {
+      "allow": 3,
+      "restrict": 0,
+      "deny": 5
+    },
+    "sa_time_s": 0.046,
+    "sa_cost": 19.92,
+    "sa_valid": true,
+    "sa_counts": {
+      "allow": 4,
+      "restrict": 0,
+      "deny": 4
+    },
+    "cost_diff": 4.4
+  }
+]

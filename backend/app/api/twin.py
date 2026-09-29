@@ -42,3 +42,17 @@ def heartbeat(node_id: str, db: Session = Depends(get_db),
     node.last_seen = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True, "node": node.to_dict()}
+
+
+@router.get("/neo4j/status")
+def neo4j_status(_: User = Depends(get_current_user)):
+    """Truthful Neo4j connectivity and status report."""
+    from app.services.neo4j_client import neo4j_client
+    return neo4j_client.check_health()
+
+
+@router.post("/neo4j/verify")
+def neo4j_verify(_: User = Depends(get_current_user)):
+    """Execute synthetic graph creation, query validation, and safe cleanup in Neo4j."""
+    from app.services.neo4j_client import neo4j_client
+    return neo4j_client.run_synthetic_verification()

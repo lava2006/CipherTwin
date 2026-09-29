@@ -26,7 +26,7 @@ export function NetworkGraph({
       groups[n.type] = groups[n.type] || [];
       groups[n.type].push(n);
     });
-    const order = ["user", "device", "server", "database", "application", "iot"];
+    const order = ["user", "device", "server", "database", "application", "iot", "honeypot"];
     const cx = width / 2;
     const cy = height / 2;
     const result: Record<string, { x: number; y: number }> = {};
@@ -53,6 +53,7 @@ export function NetworkGraph({
     database: "#f59e0b",
     application: "#22c55e",
     iot: "#94a3b8",
+    honeypot: "#f43f5e",
   };
 
   return (
@@ -88,6 +89,7 @@ export function NetworkGraph({
           const p = positioned[node.id];
           if (!p) return null;
           const isHi = highlightNodeId === node.id;
+          const isHoneypot = node.type === "honeypot" || node.id === "decoy-ssh-01";
           const fill = node.status === "compromised" ? "#ef4444" : colorByType[node.type] || "#22d3ee";
           return (
             <g
@@ -96,23 +98,59 @@ export function NetworkGraph({
               onClick={() => onSelect?.(node)}
               style={{ cursor: onSelect ? "pointer" : "default" }}
             >
-              {isHi && (
-                <circle r={14} fill={fill} fillOpacity={0.15}>
-                  <animate attributeName="r" from="10" to="20" dur="2s" repeatCount="indefinite" />
-                  <animate attributeName="fill-opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
-               </circle>
+              {/* Pulsing ring for honeypot or highlighted nodes */}
+              {(isHi || isHoneypot) && (
+                <circle r={isHoneypot ? 18 : 14} fill={isHoneypot ? "#f43f5e" : fill} fillOpacity={0.2}>
+                  <animate
+                    attributeName="r"
+                    from={isHoneypot ? "12" : "10"}
+                    to={isHoneypot ? "24" : "20"}
+                    dur={isHoneypot ? "2.5s" : "2s"}
+                    repeatCount="indefinite"
+                  />
+                  <animate
+                    attributeName="fill-opacity"
+                    from="0.5"
+                    to="0"
+                    dur={isHoneypot ? "2.5s" : "2s"}
+                    repeatCount="indefinite"
+                  />
+                </circle>
               )}
-              <circle r={isHi ? 9 : 6} fill={fill} stroke="#0b1220" strokeWidth={1.5} />
+              {isHoneypot ? (
+                <g>
+                  <polygon
+                    points="0,-11 11,0 0,11 -11,0"
+                    fill="#f43f5e"
+                    stroke="#fb7185"
+                    strokeWidth={isHi ? 2.5 : 1.5}
+                  />
+                  <text
+                    x={0}
+                    y={3.5}
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="9"
+                    fontWeight="bold"
+                    style={{ pointerEvents: "none" }}
+                  >
+                    🪤
+                  </text>
+                </g>
+              ) : (
+                <circle r={isHi ? 9 : 6} fill={fill} stroke="#0b1220" strokeWidth={1.5} />
+              )}
               <text
-                x={10}
+                x={isHoneypot ? 14 : 10}
                 y={4}
-                fill="#cbd5e1"
+                fill={isHoneypot ? "#fda4af" : "#cbd5e1"}
                 fontSize="9"
+                fontWeight={isHoneypot ? "600" : "normal"}
                 style={{ pointerEvents: "none" }}
               >
                 {node.label}
-             </text>
-          </g>
+              </text>
+            </g>
           );
         })}
     </svg>

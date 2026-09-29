@@ -1,30 +1,34 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-export function usePolling<T>(url: string, intervalMs = 5000): { data: T | null; loading: boolean } {
+export function usePolling<T>(
+  url: string,
+  intervalMs = 5000,
+): { data: T | null; loading: boolean; refetch: () => Promise<void> } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refetch = useCallback(async () => {
+    try {
+      const res = await api.get<T>(url);
+      setData(res.data);
+      setLoading(false);
+    } catch {
+      setLoading(false);
+    }
+  }, [url]);
+
   useEffect(() => {
     let active = true;
-    async function tick() {
-      try {
-        const res = await api.get<T>(url);
-        if (active) {
-          setData(res.data);
-          setLoading(false);
-        }
-      } catch {
-        if (active) setLoading(false);
-      }
-    }
-    tick();
-    const id = setInterval(tick, intervalMs);
+    refetch();
+    const id = setInterval(() => {
+      if (active) refetch();
+    }, intervalMs);
     return () => {
       active = false;
       clearInterval(id);
     };
-  }, [url, intervalMs]);
+  }, [refetch, intervalMs]);
 
-  return { data, loading };
+  return { data, loading, refetch };
 }

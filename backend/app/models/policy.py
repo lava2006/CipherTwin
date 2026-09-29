@@ -1,5 +1,5 @@
-"""Zero Trust policies and improvement history."""
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.session import Base
@@ -69,4 +69,75 @@ class PolicyImprovement(Base):
             "iterations": self.iterations,
             "summary": self.summary,
             "changes": _json.loads(self.changes) if self.changes else [],
+        }
+
+
+class PolicyRule(Base):
+    __tablename__ = "policy_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    policy_id = Column(Integer, ForeignKey("policies.id"), nullable=False, index=True)
+    condition_field = Column(String, nullable=False)  # risk_threshold, action, resource, role, device_trust, location
+    operator = Column(String, nullable=False)  # >, <, >=, <=, ==, !=, contains
+    condition_value = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # allow, restricted, deceive, deny
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "policy_id": self.policy_id,
+            "condition_field": self.condition_field,
+            "operator": self.operator,
+            "condition_value": self.condition_value,
+            "action": self.action,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PolicyVersion(Base):
+    __tablename__ = "policy_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    policy_id = Column(Integer, ForeignKey("policies.id"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    snapshot = Column(Text, nullable=False)  # JSON snapshot of policy configuration
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        import json as _json
+        return {
+            "id": self.id,
+            "policy_id": self.policy_id,
+            "version_number": self.version_number,
+            "snapshot": _json.loads(self.snapshot) if self.snapshot else {},
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PolicyChange(Base):
+    __tablename__ = "policy_changes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    policy_id = Column(Integer, ForeignKey("policies.id"), nullable=False, index=True)
+    change_type = Column(String, nullable=False)  # created, updated, tuned, rule_added
+    changed_by = Column(String, nullable=True)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def to_dict(self):
+        import json as _json
+        return {
+            "id": self.id,
+            "policy_id": self.policy_id,
+            "change_type": self.change_type,
+            "changed_by": self.changed_by,
+            "old_value": _json.loads(self.old_value) if self.old_value else None,
+            "new_value": _json.loads(self.new_value) if self.new_value else None,
+            "reason": self.reason,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }

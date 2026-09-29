@@ -1,54 +1,143 @@
 version: "3.9"
 
+networks:
+  ciphertwin-internal:
+    driver: bridge
+  ciphertwin-dmz:
+    driver: bridge
+
 services:
-  backend:
-    build:
-      context: ./backend
-    container_name: ciphertwin-backend
-    environment:
-      DATABASE_URL: "sqlite:////data/ciphertwin.db"
-      ENABLE_SIMULATION: "true"
-      TELEMETRY_INTERVAL_SECONDS: "2.5"
-      SECRET_KEY: "change-me-in-production-please-make-this-long"
-      CORS_ORIGINS: "http://localhost,http://localhost:80,http://localhost:5173"
-    volumes:
-      - backend-data:/data
-    ports:
-      - "8000:8000"
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ciphertwin-rabbitmq
     restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - ciphertwin-internal
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
-      interval: 20s
-      timeout: 3s
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 20s
 
   neo4j:
     image: neo4j:5.20-community
     container_name: ciphertwin-neo4j
+    restart: unless-stopped
     environment:
-      NEO4J_AUTH: "neo4j/ciphertwin"
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/ciphertwin}
       NEO4J_PLUGINS: "[]"
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
-    volumes:
-      - neo4j-data:/data
-      - neo4j-logs:/logs
     ports:
       - "7474:7474"
       - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: ciphertwin-cowrie
     restart: unless-stopped
+    # Security hardening for honeypot DMZ
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "2222:2222"
+      - "2223:2223"
+    volumes:
+      # Isolated dedicated honeypot storage (No host root, no docker socket)
+      - cowrie-var:/cowrie/cowrie-git/var
+    networks:
+      - ciphertwin-dmz
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+      COWRIE_OUTPUT_JSON_ENABLED: "yes"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ciphertwin-backend
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "sqlite:////data/ciphertwin.db"
+      ENABLE_SIMULATION: "true"
+      TELEMETRY_INTERVAL_SECONDS: "2.5"
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-please-make-this-long}
+      CORS_ORIGINS: "http://localhost,http://localhost:80,http://localhost:5173"
+      RABBITMQ_HOST: "rabbitmq"
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_MANAGEMENT_PORT: "15672"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_HTTP_PORT: "7474"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-ciphertwin}
+      COWRIE_ENABLED: "true"
+      COWRIE_LOG_PATH: "/data/cowrie/cowrie.json"
+      DECEPTION_MODE: "LIVE"
+    volumes:
+      - backend-data:/data
+      # Cowrie logs mounted strictly READ-ONLY into backend
+      - cowrie-var:/data/cowrie:ro
+    ports:
+      - "8000:8000"
+    networks:
+      - ciphertwin-internal
+      - ciphertwin-dmz
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
       context: ./frontend
     container_name: ciphertwin-frontend
+    restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
     ports:
       - "80:80"
-    restart: unless-stopped
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
   backend-data:
   neo4j-data:
   neo4j-logs:
+  rabbitmq-data:
+  cowrie-var:

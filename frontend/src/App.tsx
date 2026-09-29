@@ -26,7 +26,7 @@ function Protected({ children }: { children: ReactNode }) {
     return (
       <div className="flex h-screen items-center justify-center text-muted-foreground">
         <div className="animate-pulse2 text-sm uppercase tracking-widest">
-          Initializing CipherTwin SOC…
+          Initializing CipherTwin SOC...
         </div>
       </div>
     );

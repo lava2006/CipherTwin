@@ -57,3 +57,26 @@ class RiskFactor(Base):
             "contribution": self.contribution,
             "description": self.description,
         }
+
+
+class AnalystFeedback(Base):
+    __tablename__ = "analyst_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, ForeignKey("risk_decisions.id"), nullable=False, index=True)
+    analyst_id = Column(String, nullable=False, index=True)
+    original_prediction = Column(String, nullable=False)  # allow, restricted, deceive, deny
+    analyst_label = Column(String, nullable=False)  # TRUE_POSITIVE, FALSE_POSITIVE, TRUE_NEGATIVE, FALSE_NEGATIVE
+    reason = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "decision_id": self.decision_id,
+            "analyst_id": self.analyst_id,
+            "original_prediction": self.original_prediction,
+            "analyst_label": self.analyst_label,
+            "reason": self.reason,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }

@@ -6,16 +6,16 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatNumber(value: number | undefined | null): string {
-  if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (value === undefined || value === null || Number.isNaN(value)) return "-";
   if (Math.abs(value) >= 1_000_000) return (value / 1_000_000).toFixed(1) + "M";
   if (Math.abs(value) >= 1_000) return (value / 1_000).toFixed(1) + "k";
   return value.toLocaleString();
 }
 
 export function formatDateTime(input: string | null | undefined): string {
-  if (!input) return "—";
+  if (!input) return "-";
   const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleString(undefined, {
     year: "numeric",
     month: "short",
@@ -27,9 +27,9 @@ export function formatDateTime(input: string | null | undefined): string {
 }
 
 export function timeAgo(input: string | null | undefined): string {
-  if (!input) return "—";
+  if (!input) return "-";
   const d = new Date(input).getTime();
-  if (Number.isNaN(d)) return "—";
+  if (Number.isNaN(d)) return "-";
   const diff = (Date.now() - d) / 1000;
   if (diff < 60) return `${Math.max(1, Math.floor(diff))}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;

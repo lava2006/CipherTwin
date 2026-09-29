@@ -9,7 +9,7 @@ export interface UserOut {
 export interface TwinNode {
   id: string;
   label: string;
-  type: "user" | "device" | "laptop" | "desktop" | "tablet" | "server" | "database" | "application" | "iot";
+  type: "user" | "device" | "laptop" | "desktop" | "tablet" | "server" | "database" | "application" | "iot" | "honeypot";
   ip_address?: string;
   location?: string;
   department?: string;
@@ -117,6 +117,12 @@ export interface DecoySession {
   timestamp: string | null;
   threat_id: number | null;
   decoy_type: string;
+  fidelity?: "LOW" | "MEDIUM" | "HIGH";
+  persona?: string | null;
+  banner?: string | null;
+  reason?: string | null;
+  confidence?: number;
+  mode?: "SIMULATED" | "COWRIE";
   actor: string | null;
   source_ip: string | null;
   activity: string[];
@@ -133,6 +139,9 @@ export interface Honeytoken {
   value: string;
   planted_on: string | null;
   triggered: boolean;
+  last_triggered_at?: string | null;
+  triggered_by?: string | null;
+  alert_severity?: string;
   created_at: string | null;
 }
 
@@ -178,4 +187,79 @@ export interface PipelineStatus {
   decoys_activated: number;
   threats_correlated: number;
   last_event_at: string | null;
+}
+
+export interface ServiceHealth {
+  status: "HEALTHY" | "DEGRADED" | "UNAVAILABLE";
+  message: string;
+  [key: string]: any;
+}
+
+export interface SystemHealth {
+  status: "HEALTHY" | "DEGRADED" | "UNAVAILABLE";
+  timestamp: string;
+  version: string;
+  environment: string;
+  services: Record<string, ServiceHealth>;
+}
+
+export interface AnalystFeedback {
+  id: number;
+  decision_id: number;
+  analyst_id: string;
+  original_prediction: string;
+  analyst_label: "TRUE_POSITIVE" | "FALSE_POSITIVE" | "TRUE_NEGATIVE" | "FALSE_NEGATIVE";
+  reason: string | null;
+  timestamp: string | null;
+}
+
+export interface MLMetrics {
+  model_version: string;
+  model_type: string;
+  total_predictions: number;
+  normal_count: number;
+  suspicious_count: number;
+  malicious_count: number;
+  average_confidence: number;
+  holdout_accuracy: number;
+  feedback_accuracy: number | null;
+  false_positives: number;
+  false_negatives: number;
+  true_positives: number;
+  true_negatives: number;
+  total_feedback: number;
+}
+
+export interface PolicySimulation {
+  total_evaluated: number;
+  allow_count: number;
+  restricted_count: number;
+  deceive_count: number;
+  deny_count: number;
+  changed_decisions: number;
+  details: {
+    id: number;
+    risk_score: number;
+    current_decision: string;
+    simulated_decision: string;
+    flipped: boolean;
+  }[];
+  summary: string;
+}
+
+export interface BehaviourAnalysis {
+  total_evaluated: number;
+  normal_pct: number;
+  suspicious_pct: number;
+  anomalous_pct: number;
+  malicious_pct: number;
+  counts: {
+    normal: number;
+    suspicious: number;
+    anomalous: number;
+    malicious: number;
+  };
+  average_risk_score?: number;
+  average_confidence?: number;
+  summary?: string;
 }

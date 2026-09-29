@@ -30,10 +30,49 @@ def seed(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
 def trigger(token_id: int, db: Session = Depends(get_db),
             user: User = Depends(get_current_user)):
     engine = DeceptionEngine(db)
-    token = next((t for t in engine.list_tokens() if t.id == token_id), None)
-    if not token:
-        raise HTTPException(status_code=404, detail="Token not found")
-    triggered = engine.trigger_honeytoken(token.value)
-    if not triggered:
-        return {"ok": False}
-    return triggered.to_dict()
+    result = engine.trigger_honeytoken_lifecycle(
+        token_id_or_value=token_id,
+        actor=user.username,
+        source_ip="127.0.0.1",
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Honeytoken not found")
+    return result
+
+
+@router.get("/cowrie/status")
+def cowrie_status(_: User = Depends(get_current_user)):
+    """Truthful Cowrie honeypot status check."""
+    from app.services.cowrie import cowrie_service
+    return cowrie_service.check_health()
+
+
+@router.post("/cowrie/ingest")
+def cowrie_ingest(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Manually trigger ingestion of Cowrie logs."""
+    from app.services.cowrie import cowrie_service
+    count = cowrie_service.ingest_logs_to_db(db)
+    return {"ingested_sessions": count}
+
+
+@router.get("/fidelity/status")
+def fidelity_status(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Return deception fidelity and mode breakdown."""
+    from app.core.config import settings
+    from app.models.deception import DecoySession
+
+    sessions = db.query(DecoySession).all()
+    low = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "LOW")
+    med = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "MEDIUM")
+    high = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "HIGH")
+
+    return {
+        "mode": settings.deception_mode,
+        "cowrie_enabled": settings.cowrie_enabled,
+        "total_sessions": len(sessions),
+        "fidelity_breakdown": {
+            "low": low,
+            "medium": med,
+            "high": high,
+        },
+    }

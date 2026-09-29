@@ -15,8 +15,51 @@ from app.models import (
 )
 
 
+from sqlalchemy import text
+
+
 def init_schema():
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.connect() as conn:
+            # Check telemetry_events columns
+            res = conn.execute(text("PRAGMA table_info(telemetry_events)")).fetchall()
+            cols_tel = [r[1] for r in res]
+            if cols_tel and "mitre_technique" not in cols_tel:
+                conn.execute(text("ALTER TABLE telemetry_events ADD COLUMN mitre_technique VARCHAR"))
+            if cols_tel and "mitre_tactic" not in cols_tel:
+                conn.execute(text("ALTER TABLE telemetry_events ADD COLUMN mitre_tactic VARCHAR"))
+
+            # Check decoy_sessions columns
+            res_decoy = conn.execute(text("PRAGMA table_info(decoy_sessions)")).fetchall()
+            cols_decoy = [r[1] for r in res_decoy]
+            if cols_decoy and "fidelity" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN fidelity VARCHAR DEFAULT 'MEDIUM'"))
+            if cols_decoy and "reason" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN reason TEXT"))
+            if cols_decoy and "confidence" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN confidence FLOAT DEFAULT 0.85"))
+            if cols_decoy and "mode" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN mode VARCHAR DEFAULT 'SIMULATED'"))
+            if cols_decoy and "persona" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN persona VARCHAR"))
+            if cols_decoy and "banner" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN banner TEXT"))
+
+            # Check honeytokens columns
+            res_ht = conn.execute(text("PRAGMA table_info(honeytokens)")).fetchall()
+            cols_ht = [r[1] for r in res_ht]
+            if cols_ht and "last_triggered_at" not in cols_ht:
+                conn.execute(text("ALTER TABLE honeytokens ADD COLUMN last_triggered_at DATETIME"))
+            if cols_ht and "triggered_by" not in cols_ht:
+                conn.execute(text("ALTER TABLE honeytokens ADD COLUMN triggered_by VARCHAR"))
+            if cols_ht and "alert_severity" not in cols_ht:
+                conn.execute(text("ALTER TABLE honeytokens ADD COLUMN alert_severity VARCHAR DEFAULT 'critical'"))
+
+            conn.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger("ciphertwin.seed").warning("Schema migration notice: %s", e)
 
 
 def seed_users(db):
@@ -86,7 +129,38 @@ DEVICES = [
 
 
 def seed_twin(db):
-    if db.query(TwinNode).count():
+    # Ensure honeypot decoy node exists in Digital Twin
+    hp = db.query(TwinNode).filter(TwinNode.id == "decoy-ssh-01").first()
+    if not hp:
+        hp = TwinNode(
+            id="decoy-ssh-01",
+            label="🪤 SSH Cowrie Honeypot",
+            type="honeypot",
+            ip_address="10.20.10.99",
+            location="DMZ – Honeypot Subnet",
+            department="Deception Network",
+            status="online",
+            trust_score=10.0,
+            risk_score=85.0,
+            sensitivity="high",
+            os="Cowrie Linux Honeypot",
+            tags="honeypot,decoy,dmz,ssh,cowrie",
+        )
+        db.add(hp)
+        db.flush()
+
+        srv = db.query(TwinNode).filter(TwinNode.type == "server").first()
+        if srv:
+            db.add(TwinRelationship(
+                source_id=srv.id,
+                target_id="decoy-ssh-01",
+                relation="traps",
+                weight=1.0,
+                description="Honeypot Decoy Trap",
+            ))
+        db.commit()
+
+    if db.query(TwinNode).filter(TwinNode.type == "user").count():
         return
 
     user_nodes = []
@@ -174,11 +248,37 @@ POLICIES = [
 def seed_policies(db):
     if db.query(Policy).count():
         return
+    from app.models.policy import PolicyRule, PolicyVersion
+    import json as _json
+
     for name, desc, rule, prio, weight, fp, fn in POLICIES:
-        db.add(Policy(
+        p = Policy(
             name=name, description=desc, rule=rule, priority=prio,
             enabled=1, weight=weight, false_positive_rate=fp, false_negative_rate=fn,
+        )
+        db.add(p)
+        db.flush()
+
+        # Seed structured rule condition
+        cond_field = "risk_threshold" if "risk" in rule else ("device_trust" if "device" in rule else "event_type")
+        cond_val = "60" if "60" in rule else ("40" if "40" in rule else "sensitive")
+        action = "deny" if "deny" in rule else "restricted"
+        db.add(PolicyRule(
+            policy_id=p.id,
+            condition_field=cond_field,
+            operator="<" if "<" in rule else (">" if ">" in rule else "=="),
+            condition_value=cond_val,
+            action=action,
         ))
+
+        # Seed initial version snapshot
+        db.add(PolicyVersion(
+            policy_id=p.id,
+            version_number=1,
+            snapshot=_json.dumps(p.to_dict()),
+            created_by="system_init",
+        ))
+
     db.commit()
 
 
@@ -426,12 +526,103 @@ def seed_policy_history(db):
     db.commit()
 
 
+def sync_twin_to_neo4j(db):
+    """Sync all Digital Twin nodes and relationships from SQLite to Neo4j if available."""
+    print("Checking Neo4j connection...")
+    try:
+        from app.services.neo4j_client import neo4j_client
+        health = neo4j_client.check_health()
+        if health.get("status") != "HEALTHY":
+            print(f"Neo4j: UNAVAILABLE ({health.get('message', 'target machine actively refused connection')})")
+            print("  Note: Neo4j service is offline. SQLite Digital Twin remains authoritative.")
+            print("  To enable Neo4j, start the service (e.g. docker compose up -d neo4j).")
+            return False
+
+        print("Neo4j: CONNECTED (http://localhost:7474) - checking digital twin graph...")
+        nodes = db.query(TwinNode).all()
+        stats = neo4j_client.get_stats()
+        if stats.get("total_nodes", 0) >= len(nodes):
+            print(f"Neo4j: ALREADY SYNCED ({stats['total_nodes']} nodes, {stats['total_relationships']} relationships)")
+            return True
+
+        node_count = 0
+        for node in nodes:
+            label = "Asset"
+            if node.type == "user":
+                label = "User"
+            elif node.type in ("laptop", "desktop", "tablet"):
+                label = "Device"
+            elif node.type == "server":
+                label = "Server"
+            elif node.type == "database":
+                label = "Database"
+            elif node.type == "application":
+                label = "Application"
+            elif node.type == "honeypot":
+                label = "Decoy"
+
+            props = {
+                "label": node.label,
+                "type": node.type,
+                "ip_address": node.ip_address,
+                "location": node.location,
+                "department": node.department,
+                "status": node.status,
+                "trust_score": float(node.trust_score or 0),
+                "risk_score": float(node.risk_score or 0),
+                "sensitivity": node.sensitivity,
+                "os": node.os,
+                "tags": node.tags,
+            }
+            if node.type == "honeypot":
+                props.update({
+                    "is_honeypot": True,
+                    "decoy_type": "ssh",
+                    "technology": "Cowrie",
+                    "protocol": "SSH/Telnet",
+                })
+            if neo4j_client.upsert_node(node.id, label, props):
+                node_count += 1
+
+        rels = db.query(TwinRelationship).all()
+        rel_count = 0
+        for rel in rels:
+            rel_type = "CONNECTS_TO"
+            if rel.relation == "uses":
+                rel_type = "USES"
+            elif rel.relation == "accesses":
+                rel_type = "ACCESSES"
+            elif rel.relation == "hosts":
+                rel_type = "RUNS"
+            elif rel.relation == "connects_to":
+                rel_type = "CONNECTS_TO"
+            elif rel.relation == "trusts":
+                rel_type = "USES"
+            elif rel.relation == "traps":
+                rel_type = "AFFECTS"
+
+            props = {
+                "relation": rel.relation,
+                "weight": float(rel.weight or 1.0),
+                "description": rel.description or "",
+            }
+            if neo4j_client.upsert_relationship(rel.source_id, rel.target_id, rel_type, props):
+                rel_count += 1
+
+        print(f"Neo4j: SYNC COMPLETE ({node_count} nodes, {rel_count} relationships)")
+        return True
+    except Exception as e:
+        print(f"Neo4j: Sync skipped due to error: {e}")
+        return False
+
+
 def run_all():
     init_schema()
     db = SessionLocal()
     try:
         seed_users(db)
         seed_twin(db)
+        sync_twin_to_neo4j(db)
         seed_policies(db)
         seed_mitre(db)
         seed_history(db)
@@ -442,3 +633,9 @@ def run_all():
         seed_policy_history(db)
     finally:
         db.close()
+
+
+if __name__ == "__main__":
+    run_all()
+    print("SEED OK")
+

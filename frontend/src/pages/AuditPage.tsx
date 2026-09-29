@@ -102,15 +102,15 @@ export default function AuditPage() {
                 {items.map((it) => (
                   <TableRow key={it.id}>
                     <TableCell className="font-mono text-xs">{formatDateTime(it.timestamp)}</TableCell>
-                    <TableCell>{it.actor ?? "â€”"}</TableCell>
+                    <TableCell>{it.actor ?? "N/A"}</TableCell>
                     <TableCell className="font-medium">{`${it.action}`}</TableCell>
-                    <TableCell className="font-mono text-xs">{it.target ?? "â€”"}</TableCell>
+                    <TableCell className="font-mono text-xs">{it.target ?? "N/A"}</TableCell>
                     <TableCell>
                       <Badge className={severityTone(it.severity)}>{`${it.severity}`}</Badge>
                    </TableCell>
-                    <TableCell className="font-mono text-xs">{it.ip_address ?? "â€”"}</TableCell>
+                    <TableCell className="font-mono text-xs">{it.ip_address ?? "N/A"}</TableCell>
                     <TableCell className="max-w-[360px] truncate text-xs text-muted-foreground">
-                      {it.details ?? "â€”"}
+                      {it.details ?? "N/A"}
                    </TableCell>
                  </TableRow>
                 ))}

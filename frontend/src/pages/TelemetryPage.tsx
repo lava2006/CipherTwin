@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { exportCsv, formatDateTime, severityTone } from "@/lib/utils";
+import { EventSimulator } from "@/components/EventSimulator";
 
 const EVENT_TYPES = [
   "all",
@@ -81,7 +82,7 @@ export default function TelemetryPage() {
                   setSearch(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Search user, IP, locationâ€¦"
+                placeholder="Search user, IP, location..."
                 className="h-9 w-56 pl-7"
               />
         </div>
@@ -94,6 +95,8 @@ export default function TelemetryPage() {
       </div>
         }
       />
+
+      <EventSimulator />
 
       <Card>
         <CardHeader className="pb-2">
@@ -150,8 +153,8 @@ export default function TelemetryPage() {
                     <TableCell className="font-mono text-xs">{`${it.user_id}`}</TableCell>
                     <TableCell className="font-mono text-xs">{`${it.device_id}`}</TableCell>
                     <TableCell className="font-mono text-xs">{`${it.target_id}`}</TableCell>
-                    <TableCell>{it.location ?? "â€”"}</TableCell>
-                    <TableCell className="font-mono text-xs">{it.ip_address ?? "â€”"}</TableCell>
+                    <TableCell>{it.location ?? "N/A"}</TableCell>
+                    <TableCell className="font-mono text-xs">{it.ip_address ?? "N/A"}</TableCell>
                     <TableCell>
                       <Badge className={severityTone(it.status === "failure" ? "warning" : "info")}>
                         {it.status}
@@ -171,7 +174,7 @@ export default function TelemetryPage() {
                 {items.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
-                      No telemetry events match the filter yet â€” give the simulator a few seconds.
+                      No telemetry events match the filter yet - give the simulator a few seconds.
              </TableCell>
            </TableRow>
                 )}
@@ -183,7 +186,7 @@ export default function TelemetryPage() {
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <div>
-          Page {page} of {totalPages} â€¢ {total.toLocaleString()} events
+          Page {page} of {totalPages} | {total.toLocaleString()} events
     </div>
         <div className="flex items-center gap-2">
           <Button

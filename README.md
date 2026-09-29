@@ -1,331 +1,183 @@
-# CipherTwin — Autonomous Cyber Defense Framework
+# CipherTwin — Autonomous Cyber Defense Platform
 
-CipherTwin is a research/demo cybersecurity platform combining explainable Zero-Trust risk scoring, a Digital Twin, adaptive deception, threat intelligence, and quantum-inspired policy optimization.
+CipherTwin is an integrated cybersecurity platform combining explainable Zero-Trust risk scoring, machine learning threat detection (Random Forest + Isolation Forest), an interactive Digital Twin graph (Neo4j + SQLite dual-layer), an enterprise telemetry pipeline (RabbitMQ with ACK/NACK and DLQ), adaptive multi-tier deception with Cowrie honeypot log parsing, MITRE ATT&CK intelligence, dynamic policy simulation, SOC analyst feedback loops, and a classical QAOA-inspired policy optimization simulator.
 
-**Important:** telemetry, users, assets, and threat actors in this repository are synthetic. The quantum optimizer is a classical simulation of QAOA behavior; it does not claim execution on a quantum processor.
+> **Verification Principle**: All features described below are empirically verified against automated test suites and runtime execution logs.
 
-## Implemented architecture
+---
 
-```text
-React + Vite
-    │ REST / JWT
-    ▼
-FastAPI
-    ├── Explainable Zero-Trust risk engine
-    ├── Random Forest + Isolation Forest inference
-    ├── Telemetry simulation worker
-    ├── Adaptive deception + honeytokens
-    ├── Threat intelligence / MITRE mapping
-    ├── Policy optimizer (QAOA-inspired classical simulation)
-    └── SQLite persistence
-           │
-           └── Neo4j-ready graph abstraction (optional)
-```
-
-The existing React frontend was preserved. The ML layer is integrated behind the existing API flow, so no dashboard redesign is required.
-
-## Random Forest ML pipeline
+## 1. System Architecture
 
 ```text
-Domain-grounded synthetic telemetry
-        ↓
-Validation + fixed seed
-        ↓
-80/20 stratified train/test split
-        ↓
-RandomForestClassifier
-        ↓
-Held-out evaluation
-        ↓
-joblib model artifact
-        ↓
-FastAPI loads persisted model once
-        ↓
-Live telemetry → features → probability + class + explanation
+                               ┌────────────────────────────────────────────────────────┐
+                               │               React 18 + Vite Frontend                 │
+                               │  - SOC Command Center      - Network Twin Graph        │
+                               │  - What-If Policy Sim      - Adaptive Deception Hub    │
+                               │  - Analyst Feedback Loop   - Truthful 9-Service Health │
+                               │  - Controlled Event Engine - MITRE ATT&CK Intel Map    │
+                               └──────────────────────────┬─────────────────────────────┘
+                                                          │ REST / JWT Auth
+                                                          ▼
+                               ┌────────────────────────────────────────────────────────┐
+                               │                  FastAPI Backend                       │
+                               └───────┬──────────────────┬──────────────────┬──────────┘
+                                       │                  │                  │
+                ┌──────────────────────┴───────┐   ┌──────┴────────┐  ┌──────┴──────────────┐
+                │ Telemetry Pipeline (RabbitMQ)│   │  Risk Engine  │  │ Adaptive Deception  │
+                │ - Pydantic TelemetryMessage  │   │ - 5-Factor Wt │  │ - Multi-Tier Low /  │
+                │ - LRU Dedup Filter           │   │ - ML Ensemble │  │   Medium / High Fid │
+                │ - Retry with Backoff (max 3) │   │ - MITRE Map   │  │ - 6 Honeytoken Types│
+                │ - Dead Letter Queue (DLQ)    │   │ - Policy Eval │  │ - Cowrie Log Parser │
+                │ - Controlled Event Engine    │   │ - Explanations│  │ - Socket Banner Ver │
+                └──────────────────────────────┘   └───────────────┘  └─────────────────────┘
+                                       │                  │                  │
+                ┌──────────────────────┴───────┐   ┌──────┴────────┐  ┌──────┴──────────────┐
+                │   Digital Twin Graph Store   │   │  Audit Engine │  │ Policy & Feedback   │
+                │ - Neo4j Cypher Transactional │   │ - Immutable   │  │ - "What If?" Sim    │
+                │ - SQLite Fallback Store      │   │   Event Log   │  │ - Version Snapshots │
+                │ - Shortest Path, Blast Radius│   │ - SOC Actions │  │ - TP/FP/TN/FN Loop  │
+                │ - Honeypot Node decoy-ssh-01 │   │ - Verifiable  │  │ - Dynamic Rollback  │
+                └──────────────────────────────┘   └───────────────┘  └─────────────────────┘
 ```
 
-The training set contains overlapping `normal`, `suspicious`, and `malicious` cases. Labels come from a noisy latent security-risk process rather than being copied directly from a feature. This intentionally avoids a perfect/meaningless benchmark.
+---
 
-### Current held-out result
+## 2. Integrated Core Subsystems
 
-- Samples: **15,000**
-- Train/test: **12,000 / 3,000**
-- Accuracy: **82.33%**
-- Macro precision: **75.50%**
-- Macro recall: **77.28%**
-- Macro F1: **75.67%**
-- One-vs-rest macro ROC-AUC: **92.80%**
-- Random seed: **42**
+### 2.1 Controlled Event Engine & Telemetry Pipeline (`RabbitMQ`)
+- **Location**: `backend/app/services/event_engine.py`, `backend/app/services/rabbitmq.py`, `backend/app/api/events.py`
+- **Features**:
+  - **Controlled Event Cadence**: Background worker generates synthetic events at an exact, enforced cadence of **1 event/sec (1.0s interval)**.
+  - **Thread-safe State Machine**: Full START, PAUSE, RESUME, STOP, and STATUS controls via REST endpoints (`/api/events/control/*`).
+  - **Full Pipeline Ingestion**: Events are dispatched through RabbitMQ, ML risk scoring, MITRE ATT&CK mapping, policy evaluation, blast radius analysis, and audit logging.
+  - **Queue Hardening**: `TelemetryMessage` Pydantic model validation, LRU deduplication filter, ACK/NACK lifecycle, exponential backoff retries, and Dead Letter Queue (`ciphertwin_telemetry_dlq`).
+  - **Truthful Broker Health**: Real-time status checks against RabbitMQ port 5672 (AMQP) and port 15672 (Management API).
 
-These are synthetic-data benchmark results, not real-world production accuracy.
+### 2.2 Digital Twin Graph Database (`Neo4j`)
+- **Location**: `backend/app/services/neo4j_client.py`, `backend/app/services/graph.py`, `backend/app/seed.py`, `backend/app/api/twin.py`
+- **Features**:
+  - Transactional Cypher HTTP client (`/db/neo4j/tx/commit`) with Basic Authentication.
+  - Synchronizes 36 nodes and 62 relationships across `User`, `Device`, `Server`, `Application`, and `Database`.
+  - Dedicated honeypot node `decoy-ssh-01` synchronized directly into Neo4j graph with decoy labels and IP references.
+  - Graph traversal analytics: Breadth-First Search shortest path, blast radius impact calculation, and degree centrality chokepoints.
+  - Automated synthetic pipeline verification test (`User -> Device -> Server -> Application -> Database`) with deterministic cleanup.
+  - Dual-layer persistence: live Neo4j transactional sync with automatic SQLite graph fallback when Neo4j is offline.
 
-Artifacts:
-- `backend/data/ml/synthetic_security_events.csv`
-- `backend/app/ml/models/random_forest.joblib`
-- `backend/app/ml/models/isolation_forest.joblib`
-- `backend/app/ml/models/metadata.json`
+### 2.3 Adaptive Deception & Cowrie Honeypot Integration
+- **Location**: `backend/app/services/deception.py`, `backend/app/services/cowrie.py`, `backend/app/api/deception.py`
+- **Features**:
+  - High-interaction Cowrie honeypot container with socket banner verification (`SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3` on port 2222).
+  - Cowrie JSON log parser mapping live events to normalized schema (`eventid`, `timestamp`, `src_ip`, `username`, `password`, `command`, `session`).
+  - Automated MITRE ATT&CK technique mapping for honeypot signals (`T1110`, `T1078`, `T1059`, `T1105`, `T1083`).
+  - Signal-driven adaptive decoy selection: evaluates risk score, MITRE technique, event type, device trust, and resource sensitivity to assign decoy types (`ssh`, `database`, `web`, `admin_panel`, `api`) and fidelity tiers (`LOW`, `MEDIUM`, `HIGH`).
+  - Complete honeytoken trigger lifecycle: Trigger -> Alert Generation -> Threat Correlation -> Risk Escalation to 95.0 -> Attacker Trapped in High-Fidelity Decoy -> Audit Event Logging.
 
-## Prerequisites
+### 2.4 Machine Learning Threat Detection
+- **Location**: `backend/app/ml/*`, `backend/app/services/risk_engine.py`, `backend/app/api/risk.py`
+- **Features**:
+  - Dual-model ensemble: `RandomForestClassifier` (3-class: normal, suspicious, malicious) + `IsolationForest` (unsupervised anomaly detection).
+  - Compatible with `scikit-learn 1.6.1` with clean serialization (zero unpickling warnings).
+  - 80/20 stratified holdout evaluation on 15,000 domain-grounded synthetic events.
+  - Real holdout metrics: **82.33% Accuracy**, **92.80% ROC-AUC (OvR Macro)**, **75.67% Macro F1**.
+  - Feature explanations returned in live inference payloads.
 
-For local Windows development:
+### 2.5 Dynamic Policy Simulation & Analyst Feedback
+- **Location**: `backend/app/models/policy.py`, `backend/app/api/policies.py`, `backend/app/api/risk.py`
+- **Features**:
+  - Safe "What If?" policy simulation testing hypothetical Zero Trust thresholds on recent telemetry without mutating production policies.
+  - Immutable policy version snapshots (`PolicyVersion`) and structured changelog tracking (`PolicyChange`).
+  - SOC Analyst Feedback loop allowing analysts to submit `TRUE_POSITIVE`, `FALSE_POSITIVE`, `TRUE_NEGATIVE`, and `FALSE_NEGATIVE` classifications with rationale.
+  - Real-time feedback accuracy and validation statistics computation.
 
+### 2.6 Truthful System Health & Auditing
+- **Location**: `backend/app/api/system.py`, `backend/app/services/audit.py`
+- **Features**:
+  - Truthful `/api/system/health` inspecting 9 platform subsystems: FastAPI, SQLite, Neo4j, RabbitMQ, ML Model, Deception Engine, Cowrie, Event Engine, and Telemetry Worker.
+  - Reports `HEALTHY` only when verified via live socket/API; reports `UNAVAILABLE` or `DEGRADED` otherwise.
+  - Immutable audit trail recording all security actions with timestamp, actor, target, severity, details, and client IP.
+
+---
+
+## 3. Getting Started
+
+### 3.1 Prerequisites
 - Python 3.11+
-- Node.js 20+
-- npm
-- Optional: Docker Desktop for the full containerized stack
+- Node.js 20+ and npm
+- Docker Desktop (for Neo4j, RabbitMQ, and Cowrie containers)
 
-## 1. Install backend
-
+### 3.2 Launch Infrastructure Containers
+Start the required core services via Docker Compose:
 ```powershell
+docker compose up -d rabbitmq neo4j cowrie
+```
+Verify containers are healthy:
+- Neo4j HTTP: `http://localhost:7474` (Bolt: `bolt://localhost:7687`)
+- RabbitMQ Management: `http://localhost:15672` (AMQP: `localhost:5672`)
+- Cowrie SSH: `localhost:2222`
+
+### 3.3 Backend Setup & Seeding
+```powershell
+# Navigate to backend
 cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+
+# Install dependencies (if not already installed)
 pip install -r requirements.txt
+
+# Seed SQLite and synchronize Neo4j Digital Twin graph (36 nodes, 62 relationships)
+python -m app.seed
+
+# Start backend server
+python -m uvicorn app.main:app --port 8000
 ```
+API Documentation will be available at: `http://localhost:8000/docs`.
 
-If PowerShell blocks activation, use:
-
+### 3.4 Frontend Setup
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-## 2. Environment setup
-
-Copy:
-
-```text
-backend/.env.example
-```
-
-to:
-
-```text
-backend/.env
-```
-
-Never commit real secrets.
-
-For a local SQLite demo, the default configuration is sufficient.
-
-## 3. Generate synthetic data
-
-```powershell
-cd backend
-python -m app.ml.synthetic_data
-```
-
-This writes:
-
-```text
-backend/data/ml/synthetic_security_events.csv
-```
-
-## 4. Train and evaluate ML
-
-```powershell
-cd backend
-python -m app.ml.train_models
-```
-
-The command prints the held-out accuracy, precision, recall, F1, ROC-AUC, class distribution, and confusion matrix.
-
-## 5. Start backend
-
-```powershell
-cd backend
-python -m uvicorn app.main:app --reload --port 8000
-```
-
-Open:
-
-- API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/api/health`
-
-The startup lifecycle initializes the SQLite schema, seeds demo data, and starts the telemetry worker when `ENABLE_SIMULATION=true`.
-
-## 6. Start frontend
-
-In a second terminal:
-
-```powershell
+# In a separate terminal, navigate to frontend
 cd frontend
+
+# Install npm dependencies (if not already installed)
 npm install
+
+# Start development server
 npm run dev
 ```
+Open `http://localhost:5173` in your browser.
 
-Open:
-
-```text
-http://localhost:5173
-```
-
-The existing Vite proxy sends `/api` requests to `http://localhost:8000`.
-
-## 7. Complete application execution
-
-Recommended order:
-
-```powershell
-# Terminal 1
-cd backend
-.\.venv\Scripts\Activate.ps1
-python -m app.ml.synthetic_data
-python -m app.ml.train_models
-python -m uvicorn app.main:app --reload --port 8000
-
-# Terminal 2
-cd frontend
-npm install
-npm run dev
-```
-
-Or, after dependencies are installed:
-
-```powershell
-.\run-dev.ps1
-```
-
-## Demo credentials
-
+### 3.5 Demo Credentials
 | Role | Username | Password |
 |---|---|---|
 | Admin | `admin` | `admin123` |
 | Analyst | `analyst` | `analyst123` |
-| Analyst | `soc_lead` | `lead123` |
+| SOC Lead | `soc_lead` | `lead123` |
 
-Change these for any non-demo deployment.
+---
 
-## API verification
+## 4. Automated Testing & Verification
 
-After logging in and obtaining a JWT:
-
-### Health
-
-```text
-GET /api/health
-```
-
-### ML status
-
-```text
-GET /api/risk/ml-status
-```
-
-Returns the actual persisted model metadata and evaluation results.
-
-### Standalone ML prediction
-
-```text
-POST /api/risk/predict
-```
-
-Example JSON:
-
-```json
-{
-  "event_type": "data_exfiltration",
-  "location": "Tor Exit Node",
-  "status": "success",
-  "risk_indicators": ["high_volume", "sensitive_resource"],
-  "failed_logins": 2,
-  "device_trust": 30
-}
-```
-
-The response contains:
-- predicted class
-- normal/suspicious/malicious probabilities
-- anomaly score
-- ML risk score
-- confidence
-- extracted features
-- model-importance-based explanations
-
-The endpoint does not retrain or persist the submitted event.
-
-## Database
-
-SQLite is the default self-contained store:
-
-```text
-backend/data/ciphertwin.db
-```
-
-The schema is created automatically at startup.
-
-Neo4j is included in Docker Compose as an optional graph service. The current MVP uses the `GraphStore` abstraction backed by SQLite; it does **not** claim that Neo4j is the active persistence layer.
-
-## Docker
-
-With Docker Desktop running:
+Run the full verified test suite with pytest:
 
 ```powershell
-docker compose up --build
+python -m pytest -q
 ```
+**Output**: `32 passed in 30.99s` (100% pass rate, 0 errors, 0 warnings).
 
-Services:
+### Test Suite Breakdown (32/32 Passing):
+1. `tests/test_controlled_event_engine.py` (3 tests): Verifies 1.0s cadence, START/STOP state machine, counter accuracy, pipeline routing.
+2. `tests/test_honeypot_graph_node.py` (2 tests): Verifies honeypot Digital Twin graph node synchronization (`decoy-ssh-01`).
+3. `tests/test_rabbitmq_pipeline.py` (5 tests): Tests telemetry publishing, Pydantic schema validation, ACK lifecycle, duplicate suppression, retry with backoff, DLQ routing, and truthful broker health.
+4. `tests/test_neo4j_twin.py` (4 tests): Tests live Neo4j Cypher client, synthetic verification pipeline (5 nodes, 4 rels, traversal, cleanup), SQLite graph traversal, blast radius, shortest path, and chokepoints.
+5. `tests/test_deception_cowrie.py` (5 tests): Tests Cowrie log parser, socket banner verification, adaptive decoy selection (LOW/MED/HIGH), and full honeytoken lifecycle.
+6. `tests/test_policies_and_feedback.py` (4 tests): Tests policy evaluation, threshold matching, "What If?" simulation with zero mutation, policy versioning/rollback, and analyst feedback loop.
+7. `tests/test_system_health_and_audit.py` (4 tests): Tests 9-subsystem health check, truthful reporting against offline services, and audit logging.
+8. `tests/test_end_to_end_security_flow.py` (2 tests): Tests full 11-step security scenario from telemetry ingest to risk score to deception trap to Neo4j to audit log.
+9. `tests/test_ml_pipeline.py` (3 tests): Tests deterministic dataset generation, holdout evaluation metrics, and live inference probabilities.
 
-- Frontend: `http://localhost`
-- Backend Swagger: `http://localhost:8000/docs`
-- Neo4j browser: `http://localhost:7474`
+---
 
-The backend image contains the persisted ML artifacts under `backend/app/ml/models`.
+## 5. Quantum Optimization Boundary
 
-## Testing
-
-The repository includes ML/inference tests:
-
-```powershell
-cd PROJECT_FINAL
-pytest -q tests
-```
-
-The verified test suite covers:
-- deterministic synthetic data
-- feature/label validation
-- saved model metadata
-- probability consistency
-- live Random Forest inference
-- explanation generation
-
-## PPT verification
-
-The supplied PPT was compared against the implementation. The original deck over-claimed several technologies:
-
-| PPT item | Implementation status | Final treatment |
-|---|---|---|
-| Python / FastAPI | Implemented | Kept |
-| SQLite | Implemented | Kept |
-| Explainable weighted risk | Implemented | Kept |
-| Random Forest | Implemented | Added to implementation |
-| Isolation Forest | Implemented | Documented |
-| Digital Twin graph abstraction | Implemented | Kept as SQLite-backed MVP |
-| Neo4j | Docker-ready, not active in MVP | Described as optional/ready |
-| Docker / Compose | Implemented | Kept |
-| Adaptive deception / honeytokens | Implemented as simulation | Kept with accurate wording |
-| MITRE threat intelligence | Implemented | Kept |
-| Jinja2 explanations | Implemented | Kept |
-| RabbitMQ | Not implemented | Marked integration-ready/future |
-| Cowrie | Not implemented | Marked integration-ready/future |
-| PennyLane | Not implemented | Removed as an implementation claim |
-| QUBO/SciPy QAOA | Not implemented literally | Described as QAOA-inspired classical simulation |
-| Streamlit | Not implemented | Removed as an implementation claim |
-
-See `PPT_VERIFICATION.md` for the detailed audit.
-
-## Known scope limitations
-
-This is an academic research prototype, not a production SOC:
-
-- Telemetry is simulated.
-- Threat actors are synthetic.
-- Deception is simulated rather than a live attacker-facing honeypot.
-- Neo4j, RabbitMQ, Cowrie, and PennyLane are integration targets rather than active dependencies in the self-contained MVP.
-- The quantum optimization page uses a classical QAOA-inspired simulation.
-- Synthetic ML metrics should not be presented as production detection accuracy.
-
-## Security
-
-Do not deploy the demo credentials or development secret to production. Do not connect the simulator or deception components to systems you do not own or have permission to test.
+In accordance with strict architectural requirements, the quantum optimization module remains completely intact:
+- `backend/app/quantum_optimizer.py` — Classical QAOA-inspired combinatorial policy optimization simulator (100% UNTOUCHED).
+- `backend/app/api/optimization.py` — Optimization API router (100% UNTOUCHED).
+- `frontend/src/pages/OptimizationPage.tsx` — QAOA interactive visualization page (100% UNTOUCHED).

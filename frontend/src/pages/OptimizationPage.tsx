@@ -41,7 +41,7 @@ export default function OptimizationPage() {
     try {
       const res = await api.post<OptimizationResult>("/optimization/run", { layers: 3, iterations: 60 });
       setResult(res.data);
-      toast({ title: "Optimization complete", description: `Score ${res.data.before_score} â†’ ${res.data.after_score}.`, variant: "success" });
+      toast({ title: "Optimization complete", description: `Score ${res.data.before_score} to ${res.data.after_score}.`, variant: "success" });
     } catch (e) {
       toast({ title: "Optimization failed", variant: "error" });
     } finally {
@@ -109,7 +109,7 @@ export default function OptimizationPage() {
                     <th className="py-1.5">Policy</th>
                     <th className="py-1.5">Before</th>
                     <th className="py-1.5">After</th>
-                    <th className="py-1.5">Î”</th>
+                    <th className="py-1.5">Delta</th>
                  </tr>
                </thead>
                 <tbody>
@@ -148,7 +148,7 @@ export default function OptimizationPage() {
                     <div key={p.id} className="flex items-center gap-3 rounded-md border border-border bg-card/40 p-2">
                       <div className="flex-1">
                         <div className="text-sm font-medium">{`${p.name}`}</div>
-                        <div className="text-xs text-muted-foreground">FP {(p.false_positive_rate * 100).toFixed(1)}% â€¢ FN {(p.false_negative_rate * 100).toFixed(1)}%</div>
+                        <div className="text-xs text-muted-foreground">FP {(p.false_positive_rate * 100).toFixed(1)}% | FN {(p.false_negative_rate * 100).toFixed(1)}%</div>
                      </div>
                       <Badge variant={p.enabled ? "success" : "outline"}>{p.enabled ? "enabled" : "disabled"}</Badge>
                       <span className="font-mono text-xs text-cyber-cyan">{p.weight.toFixed(2)}</span>
@@ -176,9 +176,9 @@ export default function OptimizationPage() {
                  </div>
                   <div className="mt-1 flex items-center gap-2 text-sm">
                     <span className="font-mono">{h.before_score?.toFixed(2)}</span>
-                    <span>â†’</span>
+                    <span className="text-xs text-muted-foreground">to</span>
                     <span className="font-mono text-emerald-300">{h.after_score?.toFixed(2)}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">Î” {(h.before_score - h.after_score).toFixed(2)} â€¢ {h.iterations} iter / {h.duration_ms} ms</span>
+                    <span className="ml-auto text-xs text-muted-foreground">Delta {(h.before_score - h.after_score).toFixed(2)} | {h.iterations} iter / {h.duration_ms} ms</span>
                  </div>
                   <div className="mt-1 text-xs text-muted-foreground">{`${h.summary}`}</div>
                </div>

@@ -19,8 +19,7 @@ logging.basicConfig(level=logging.INFO,
 async def lifespan(app: FastAPI):
     # Run database schema + seed data on startup.
     run_all()
-    if settings.enable_simulation:
-        start_background()
+    # Controlled event engine starts in STOPPED state; user controls it via UI / API
     yield
 
 

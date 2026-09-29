@@ -73,7 +73,7 @@ export default function LoginPage() {
           <p className="text-muted-foreground">
             Continuously simulate telemetry, evaluate risk, redirect threats into
             adaptive decoys, and let QAOA-inspired policy tuning keep your
-            posture sharp â€” all in a single SOC cockpit.
+            posture sharp - all in a single SOC cockpit.
          </p>
           <div className="grid grid-cols-2 gap-3">
             <Feature title="Digital Twin" desc="Live enterprise graph." />
@@ -84,7 +84,7 @@ export default function LoginPage() {
      </div>
 
         <div className="text-xs text-muted-foreground">
-          Â© {new Date().getFullYear()} CipherTwin Research Prototype â€” For academic use only.
+          CipherTwin Research Prototype - For academic use only.
      </div>
    </div>
 

@@ -54,3 +54,55 @@ def event_types(db: Session = Depends(get_db), _: User = Depends(get_current_use
     for et, _ in rows:
         counts[et] = sum(1 for e in db.query(TelemetryEvent).filter(TelemetryEvent.event_type == et).all())
     return list(counts.items())
+
+
+@router.post("/publish")
+def publish_telemetry(payload: dict, _: User = Depends(get_current_user)):
+    """Publish a validated telemetry event to RabbitMQ."""
+    from app.services.rabbitmq import rabbitmq_pipeline
+    ok, msg = rabbitmq_pipeline.publish(payload)
+    if not ok:
+        return {"ok": False, "error": msg}
+    return {"ok": True, "message_id": msg}
+
+
+@router.post("/consume")
+def consume_telemetry(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Consume and process one message from RabbitMQ queue through Zero Trust Risk Engine."""
+    from app.services.rabbitmq import rabbitmq_pipeline
+    res = rabbitmq_pipeline.process_one(db)
+    if not res:
+        return {"processed": False, "message": "Queue empty or message rejected"}
+    return {"processed": True, "result": res}
+
+
+@router.get("/pipeline")
+def telemetry_pipeline_status(_: User = Depends(get_current_user)):
+    """Return stats and live broker health for RabbitMQ pipeline."""
+    from app.services.rabbitmq import rabbitmq_pipeline
+    return {
+        "stats": rabbitmq_pipeline.stats,
+        "health": rabbitmq_pipeline.check_health(),
+    }
+
+
+@router.post("/generator/start")
+def start_generator(_: User = Depends(get_current_user)):
+    """Start the controlled 1-event/sec event engine."""
+    from app.services.event_engine import event_engine
+    return event_engine.start()
+
+
+@router.post("/generator/stop")
+def stop_generator(_: User = Depends(get_current_user)):
+    """Stop the controlled event engine."""
+    from app.services.event_engine import event_engine
+    return event_engine.stop()
+
+
+@router.get("/generator/status")
+def generator_status(_: User = Depends(get_current_user)):
+    """Get the live status and timeline of the controlled event engine."""
+    from app.services.event_engine import event_engine
+    return event_engine.get_status()
+

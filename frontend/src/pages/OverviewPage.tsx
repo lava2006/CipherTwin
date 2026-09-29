@@ -32,6 +32,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { riskColor, severityTone, timeAgo } from "@/lib/utils";
+import { EventSimulator } from "@/components/EventSimulator";
 
 const PIE_COLORS = ["#22d3ee", "#1f8ef1", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#0ea5e9", "#a855f7"];
 
@@ -57,6 +58,8 @@ export default function OverviewPage() {
         title="SOC Command Center"
         description="Real-time Zero Trust posture, digital twin pulse, and deception coverage."
       />
+
+      <EventSimulator />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6">
         {overview.loading && !stats ? (
@@ -187,7 +190,7 @@ export default function OverviewPage() {
                   <div className="h-10 w-1.5 rounded-full" style={{ backgroundColor: riskColor(u.avg_risk) }} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{`${u.label}`}</div>
-                    <div className="text-xs text-muted-foreground">{`${u.department} â€¢ ${u.events} decisions`}</div>
+                    <div className="text-xs text-muted-foreground">{`${u.department} | ${u.events} decisions`}</div>
                 </div>
                   <div className="text-sm font-bold" style={{ color: riskColor(u.avg_risk) }}>
                     {`${u.avg_risk.toFixed(0)}`}

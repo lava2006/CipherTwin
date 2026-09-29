@@ -231,7 +231,34 @@ class ZeroTrustEngine:
                 "ML inference unavailable; using explainable rule score | event=%s", event.id
             )
 
-        if total < settings.risk_threshold_allow:
+        # Map MITRE ATT&CK technique and tactic
+        try:
+            import json as _json
+            from app.services.mitre import map_event_to_mitre
+            indicators = _json.loads(event.risk_indicators) if isinstance(event.risk_indicators, str) else (event.risk_indicators or [])
+            mitre_match = map_event_to_mitre(event.event_type, indicators)
+            if mitre_match:
+                event.mitre_technique = mitre_match["technique_id"]
+                event.mitre_tactic = mitre_match["tactic"]
+        except Exception:
+            pass
+
+        # Evaluate against active Zero Trust policies
+        from app.models.policy import Policy
+        active_policies = db.query(Policy).filter(Policy.enabled == 1).order_by(Policy.priority.desc()).all()
+        policy_decision = None
+        for p in active_policies:
+            rule_str = p.rule.lower()
+            if "deny_if:risk>60" in rule_str and total > 60:
+                policy_decision = "deny" if total >= 80 else "deceive"
+                break
+            elif "deny" in rule_str and total >= settings.risk_threshold_deny:
+                policy_decision = "deny"
+                break
+
+        if policy_decision:
+            decision = policy_decision
+        elif total < settings.risk_threshold_allow:
             decision = "allow"
         elif total < settings.risk_threshold_restricted:
             decision = "restricted"
