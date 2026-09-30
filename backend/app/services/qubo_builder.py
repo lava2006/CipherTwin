@@ -44,7 +44,7 @@ def build_policy_qubo(
     lambda_capacity: float = 6.0,
     w_risk: float = 10.0,
     w_friction: float = 8.0,
-    w_decoy: float = 2.0,
+    w_decoy: float = 0.5,
 ) -> Tuple[np.ndarray, float, List[str], Dict[Tuple[int, int], float]]:
     """Build the QUBO Q-matrix and constant offset for the given policy units.
 
@@ -83,6 +83,7 @@ def build_policy_qubo(
     n_vars = 3 * n_units
     Q = np.zeros((n_vars, n_vars), dtype=np.float64)
     offset = 0.0
+    action_costs: List[Tuple[float, float, float]] = []
 
     var_names: List[str] = []
     for i, u in enumerate(units):
@@ -107,6 +108,7 @@ def build_policy_qubo(
         c_restrict = (0.30 * w_risk * r_i) + (0.40 * w_friction * t_i) + w_decoy
         # Deny: 0 risk cost, maximum friction on trusted users
         c_deny = 1.0 * w_friction * t_i
+        action_costs.append((c_allow, c_restrict, c_deny))
 
         # One-hot penalty: lambda_onehot * (x_allow + x_restrict + x_deny - 1)^2
         # = lambda_onehot * [ (x_allow + x_restrict + x_deny)^2 - 2(x_allow + x_restrict + x_deny) + 1 ]
@@ -123,24 +125,41 @@ def build_policy_qubo(
         # Constant term from one-hot penalty
         offset += lambda_onehot
 
-    # 2. Decoy Capacity constraint across all units
-    # Restrict action variables: R = sum_i x_{i, restrict}
-    # Penalty on exceeding decoy_capacity: pairwise contention penalty
-    # For pairs of distinct units (i < j): +lambda_capacity * x_{i, restrict} * x_{j, restrict}
-    # If decoy_capacity == 0: forbid any decoy by heavy linear penalty
-    if decoy_capacity <= 0:
-        for i in range(n_units):
-            idx_r = get_var_index(i, ACTION_RESTRICT)
-            Q[idx_r, idx_r] += lambda_capacity * 5.0
-    else:
-        # Pairwise contention scaling: when more than decoy_capacity units choose restrict,
-        # pairwise interactions penalize the surplus configurations.
-        contention_factor = lambda_capacity / max(1.0, float(decoy_capacity))
-        for i in range(n_units):
-            idx_ri = get_var_index(i, ACTION_RESTRICT)
-            for j in range(i + 1, n_units):
-                idx_rj = get_var_index(j, ACTION_RESTRICT)
-                Q[idx_ri, idx_rj] += contention_factor
+    # 2. Encode sum(restrict) <= capacity as sum(restrict) + slack = capacity.
+    # The penalty exceeds the largest possible change in valid action costs.
+    capacity = max(0, int(decoy_capacity))
+    if capacity < n_units:
+        cost_range = sum(max(costs) - min(costs) for costs in action_costs)
+        capacity_penalty = max(float(lambda_capacity), cost_range + 1.0)
+        restrict_indices = [get_var_index(i, ACTION_RESTRICT) for i in range(n_units)]
+
+        if capacity == 0:
+            for idx in restrict_indices:
+                Q[idx, idx] += capacity_penalty
+        else:
+            slack_weights: List[int] = []
+            slack_total = 0
+            weight = 1
+            while slack_total < capacity:
+                slack_weights.append(weight)
+                slack_total += weight
+                weight *= 2
+
+            old_size = Q.shape[0]
+            Q = np.pad(Q, ((0, len(slack_weights)), (0, len(slack_weights))))
+            var_names.extend(f"capacity_slack_{i}" for i in range(len(slack_weights)))
+
+            weighted_indices = [(idx, 1.0) for idx in restrict_indices]
+            weighted_indices.extend(
+                (old_size + i, float(slack_weight))
+                for i, slack_weight in enumerate(slack_weights)
+            )
+            offset += capacity_penalty * capacity * capacity
+            for idx, coefficient in weighted_indices:
+                Q[idx, idx] += capacity_penalty * (coefficient * coefficient - 2.0 * capacity * coefficient)
+            for position, (i, coefficient_i) in enumerate(weighted_indices):
+                for j, coefficient_j in weighted_indices[position + 1:]:
+                    Q[min(i, j), max(i, j)] += 2.0 * capacity_penalty * coefficient_i * coefficient_j
 
     # Build dictionary for dimod/neal
     qubo_dict: Dict[Tuple[int, int], float] = {}

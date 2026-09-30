@@ -47,20 +47,20 @@ ARCHITECTURE & EMPIRICAL FOUNDATION
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import product
 import json
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import pennylane as qml
-from pennylane import numpy as pnp
 import dimod
 import neal
 from sqlalchemy.orm import Session
 
 from app.models.policy import Policy, PolicyImprovement, PolicyChange, PolicyVersion
 from app.models.risk import RiskDecision, AnalystFeedback
+from app.models.twin import TwinNode
 from app.services.qubo_builder import (
     build_policy_qubo,
     evaluate_solution_cost,
@@ -71,6 +71,9 @@ from app.services.qubo_builder import (
 logger = logging.getLogger("ciphertwin.qapre")
 
 MAX_BATCH_UNITS = 6  # 18 qubits practical ceiling for sub-second lightning.qubit simulation
+MAX_QAOA_QUBITS = 18
+QAOA_TIMEOUT_SECONDS = 24.0
+QAOA_SAMPLE_SHOTS = 1000
 DEFAULT_DECOY_CAPACITY = 2  # Default concurrent high-fidelity honeypot limit in ACDE
 
 
@@ -89,6 +92,12 @@ class OptimizationResult:
     classical_cost: Optional[float] = None
     classical_duration_ms: Optional[int] = None
     bitstring: Optional[str] = None
+    method: Optional[str] = None
+    fallback_reason: Optional[str] = None
+    decoy_method: Optional[str] = None
+    decoy_fallback_reason: Optional[str] = None
+    decoy_assignments: Optional[List[Dict[str, Any]]] = None
+    qubits: Optional[int] = None
 
 
 def qubo_to_ising(Q: np.ndarray, offset: float) -> Tuple[np.ndarray, Dict[Tuple[int, int], float], float]:
@@ -124,6 +133,8 @@ def qubo_to_ising(Q: np.ndarray, offset: float) -> Tuple[np.ndarray, Dict[Tuple[
 
 def build_qaoa_hamiltonians(h: np.ndarray, J: Dict[Tuple[int, int], float], num_qubits: int):
     """Construct PennyLane Cost and Mixer Hamiltonians programmatically."""
+    import pennylane as qml
+
     coeffs = []
     obs = []
 
@@ -224,9 +235,22 @@ class QuantumOptimizer:
         units: List[Dict[str, Any]],
         p_layers: int = 3,
         iterations: int = 30,
+        decoy_capacity: int = DEFAULT_DECOY_CAPACITY,
     ) -> Tuple[List[int], float, int, float, List[float]]:
         """Construct and execute QAOA circuit via PennyLane lightning.qubit."""
-        num_qubits = len(units) * 3
+        import pennylane as qml
+        from pennylane import numpy as pnp
+
+        if Q.ndim != 2 or Q.shape[0] != Q.shape[1] or Q.shape[0] < len(units) * 3:
+            raise ValueError(f"Malformed QUBO shape {Q.shape} for {len(units)} policy units")
+        if not np.isfinite(Q).all() or not np.isfinite(offset):
+            raise ValueError("QUBO contains non-finite coefficients")
+
+        num_qubits = Q.shape[0]
+        if num_qubits > MAX_QAOA_QUBITS:
+            raise ValueError(
+                f"QAOA batch too large: {num_qubits} qubits exceeds limit {MAX_QAOA_QUBITS}"
+            )
         h, J, h0 = qubo_to_ising(Q, offset)
         cost_h, mixer_h = build_qaoa_hamiltonians(h, J, num_qubits)
 
@@ -246,33 +270,49 @@ class QuantumOptimizer:
 
         # Initialize parameter angles
         init_params = pnp.array([
-            [0.1 * (i + 1) for i in range(p_layers)],  # gammas
-            [0.1 * (p_layers - i) for i in range(p_layers)],  # betas
+            [0.1 * (i + 1) for i in range(p_layers)],
+            [0.1 * (p_layers - i) for i in range(p_layers)],
         ], requires_grad=True)
 
         params = init_params
-        opt = qml.AdamOptimizer(stepsize=0.08)
-        cost_history: List[float] = []
+        opt = qml.AdamOptimizer(stepsize=0.01)
+        initial_cost = float(cost_qnode(params))
+        if not np.isfinite(initial_cost):
+            raise FloatingPointError(f"QAOA initial cost is non-finite: {initial_cost}")
+        best_cost = initial_cost
+        best_params = np.array(params, copy=True)
+        cost_history = [initial_cost]
 
         logger.info("Starting QAOA parameter training on lightning.qubit (layers=%d, max_iter=%d)...",
                     p_layers, iterations)
-        t_start = time.time()
+        t_start = time.perf_counter()
         for step in range(iterations):
-            params, cost_val = opt.step_and_cost(cost_qnode, params)
-            cost_flt = float(cost_val)
+            if time.perf_counter() - t_start >= QAOA_TIMEOUT_SECONDS:
+                raise TimeoutError(
+                    f"QAOA exceeded its {QAOA_TIMEOUT_SECONDS:.0f}s request budget"
+                )
+            params, _ = opt.step_and_cost(cost_qnode, params)
+            cost_flt = float(cost_qnode(params))
+            if not np.isfinite(cost_flt) or not np.isfinite(np.asarray(params)).all():
+                raise FloatingPointError(f"QAOA cost or parameters became non-finite at step {step + 1}")
             cost_history.append(cost_flt)
             logger.info("QAOA Iteration %02d/%02d | Cost Hamiltonian <H_C>: %.4f",
                         step + 1, iterations, cost_flt)
+            if cost_flt < best_cost:
+                best_cost = cost_flt
+                best_params = np.array(params, copy=True)
 
-        opt_time = time.time() - t_start
+        opt_time = time.perf_counter() - t_start
 
-        # Sample measurement distribution with 1000 shots
-        @qml.qnode(dev, shots=1000)
+        # Sample the optimized state; constrained feasibility is handled during decoding.
+        @qml.qnode(dev, shots=QAOA_SAMPLE_SHOTS)
         def sample_qnode(params):
             qaoa_circuit(params)
             return qml.sample()
 
-        samples = sample_qnode(params)
+        samples = np.asarray(sample_qnode(best_params))
+        if samples.ndim != 2 or samples.shape[1] != num_qubits or samples.shape[0] == 0:
+            raise ValueError(f"Unexpected QAOA sample shape {samples.shape}; expected (shots, {num_qubits})")
 
         # Decode optimal bitstring
         best_valid_bitstring = None
@@ -284,61 +324,230 @@ class QuantumOptimizer:
 
         for bit_tuple, _ in counts.most_common():
             b_list = list(bit_tuple)
-            is_valid, _, _ = decode_solution(b_list, units)
-            if is_valid:
+            is_valid, _, action_counts = decode_solution(b_list, units)
+            restrict_count = action_counts["restrict"]
+            slack_bits = b_list[3 * len(units):]
+            slack_value = sum((1 << i) * bit for i, bit in enumerate(slack_bits))
+            capacity_valid = restrict_count <= max(0, decoy_capacity)
+            if 0 < decoy_capacity < len(units):
+                capacity_valid = capacity_valid and restrict_count + slack_value == decoy_capacity
+            if is_valid and capacity_valid:
                 c = evaluate_solution_cost(b_list, Q, offset)
                 if c < best_valid_cost:
                     best_valid_cost = c
                     best_valid_bitstring = b_list
 
-        # Documented Fallback: If no sampled state satisfies one-hot constraint,
-        # apply deterministic marginal argmax over action probabilities per unit
         if best_valid_bitstring is None:
-            logger.warning("No strictly valid one-hot configuration in sampled shots. Applying deterministic marginal argmax fallback.")
-            sample_arr = np.array(samples)
-            marginals = sample_arr.mean(axis=0)  # probability per qubit
-            best_valid_bitstring = [0] * num_qubits
-            for i in range(len(units)):
-                action_probs = [marginals[3 * i], marginals[3 * i + 1], marginals[3 * i + 2]]
-                best_act = int(np.argmax(action_probs))
-                best_valid_bitstring[3 * i + best_act] = 1
-            best_valid_cost = evaluate_solution_cost(best_valid_bitstring, Q, offset)
+            logger.warning(
+                "QAOA shots contained no feasible sample; projecting measured action marginals "
+                "onto the exact capacity constraint"
+            )
+            action_probabilities = []
+            for unit_index in range(len(units)):
+                segments = samples[:, 3 * unit_index:3 * unit_index + 3]
+                one_hot_rows = segments.sum(axis=1) == 1
+                if one_hot_rows.any():
+                    action_probabilities.append(segments[one_hot_rows].mean(axis=0))
+                else:
+                    action_probabilities.append(segments.mean(axis=0))
 
-        return best_valid_bitstring, best_valid_cost, len(cost_history), opt_time, cost_history
+            best_projection_score = float("-inf")
+            capacity = max(0, decoy_capacity)
+            for actions in product(range(3), repeat=len(units)):
+                restrict_count = actions.count(1)
+                if restrict_count > capacity:
+                    continue
+
+                candidate = [0] * num_qubits
+                for unit_index, action_index in enumerate(actions):
+                    candidate[3 * unit_index + action_index] = 1
+
+                slack_remaining = capacity - restrict_count
+                for slack_index in range(num_qubits - 3 * len(units)):
+                    slack_bit = slack_remaining & 1
+                    candidate[3 * len(units) + slack_index] = slack_bit
+                    slack_remaining >>= 1
+                if slack_remaining:
+                    continue
+
+                projection_score = sum(
+                    float(np.log(max(action_probabilities[i][action], 1e-6)))
+                    for i, action in enumerate(actions)
+                )
+                candidate_cost = evaluate_solution_cost(candidate, Q, offset)
+                if (
+                    projection_score > best_projection_score
+                    or (projection_score == best_projection_score and candidate_cost < best_valid_cost)
+                ):
+                    best_projection_score = projection_score
+                    best_valid_cost = candidate_cost
+                    best_valid_bitstring = candidate
+
+        if best_valid_bitstring is None:
+            raise RuntimeError("QAOA decoder found no capacity-feasible policy assignment")
+
+        return best_valid_bitstring, best_valid_cost, iterations, opt_time, cost_history
 
     def _solve_classical_baseline(
         self,
         qubo_dict: Dict[Tuple[int, int], float],
         offset: float,
         units: List[Dict[str, Any]],
+        num_variables: Optional[int] = None,
     ) -> Tuple[List[int], float, float]:
         """Run Simulated Annealing on the exact same QUBO as mandatory classical baseline."""
         t_start = time.time()
         bqm = dimod.BinaryQuadraticModel.from_qubo(qubo_dict, offset=offset)
         sa_sampler = neal.SimulatedAnnealingSampler()
-        sampleset = sa_sampler.sample(bqm, num_reads=150)
+        sampleset = sa_sampler.sample(bqm, num_reads=150, seed=0)
         sa_time = time.time() - t_start
 
         best_sample = sampleset.first
-        bitstring = [int(best_sample.sample.get(i, 0)) for i in range(3 * len(units))]
+        variable_count = num_variables or (3 * len(units))
+        bitstring = [int(best_sample.sample.get(i, 0)) for i in range(variable_count)]
         classical_energy = float(best_sample.energy)
         return bitstring, classical_energy, sa_time
+
+    def _optimize_decoy_placement(
+        self,
+        *,
+        decoy_capacity: int,
+        layers: int,
+        iterations: int,
+    ) -> Dict[str, Any]:
+        """Optimize decoy placement over all deployable nodes in the twin."""
+        nodes = (
+            self.db.query(TwinNode)
+            .filter(TwinNode.type.notin_(("user", "honeypot")))
+            .order_by(TwinNode.id)
+            .all()
+        )
+        if not nodes:
+            return {
+                "assignments": [],
+                "method": None,
+                "fallback_reason": None,
+            }
+
+        node_ids = [node.id for node in nodes]
+        recent_decisions = (
+            self.db.query(RiskDecision)
+            .filter(RiskDecision.resource_id.in_(node_ids))
+            .order_by(RiskDecision.timestamp.desc())
+            .all()
+        )
+        risk_by_node: Dict[str, float] = {}
+        for decision in recent_decisions:
+            if decision.resource_id not in risk_by_node:
+                risk_by_node[decision.resource_id] = float(decision.risk_score)
+
+        units = [
+            {
+                "id": node.id,
+                "name": node.label,
+                "risk_score": min(100.0, max(0.0, risk_by_node.get(node.id, node.risk_score or 0.0))),
+                "trust_score": min(100.0, max(0.0, node.trust_score or 0.0)),
+            }
+            for node in nodes
+        ]
+        Q, offset, _, qubo_dict = build_policy_qubo(
+            units=units,
+            decoy_capacity=decoy_capacity,
+            lambda_onehot=14.0,
+            lambda_capacity=8.0,
+            w_risk=10.0,
+            w_friction=8.0,
+            w_decoy=0.5,
+        )
+
+        method = "quantum"
+        fallback_reason = None
+        if len(units) > MAX_BATCH_UNITS or Q.shape[0] > MAX_QAOA_QUBITS:
+            method = "classical_fallback"
+            fallback_reason = (
+                f"Decoy placement batch too large for QAOA: {len(units)} nodes, "
+                f"{Q.shape[0]} qubits (limit {MAX_QAOA_QUBITS})"
+            )
+            logger.warning("QAOA fallback for decoy placement: %s", fallback_reason)
+        else:
+            try:
+                bitstring, _, _, _, _ = self._solve_qaoa(
+                    Q=Q,
+                    offset=offset,
+                    units=units,
+                    p_layers=max(1, min(layers, 2)),
+                    iterations=max(1, min(iterations, 10)),
+                    decoy_capacity=decoy_capacity,
+                )
+            except Exception as exc:
+                method = "classical_fallback"
+                fallback_reason = f"{type(exc).__name__}: {exc}"
+                logger.exception("QAOA fallback for decoy placement | reason=%s", fallback_reason)
+
+        if method == "classical_fallback":
+            bitstring, _, _ = self._solve_classical_baseline(
+                qubo_dict=qubo_dict,
+                offset=offset,
+                units=units,
+                num_variables=Q.shape[0],
+            )
+
+        valid, assignments, counts = decode_solution(bitstring, units)
+        if not valid or counts["restrict"] > max(0, decoy_capacity):
+            raise RuntimeError(
+                "Decoy solver returned an infeasible assignment "
+                f"(one_hot={valid}, restrict={counts['restrict']}, capacity={decoy_capacity})"
+            )
+
+        selected_ids = {
+            assignment["unit"]
+            for assignment in assignments
+            if assignment["action"] == "restrict"
+        }
+        result_assignments = []
+        for node, unit in zip(nodes, units):
+            tags = [tag for tag in (node.tags or "").split(",") if tag and tag != "optimized_honeypot"]
+            if node.id in selected_ids:
+                tags.append("optimized_honeypot")
+                result_assignments.append({
+                    "node_id": node.id,
+                    "label": node.label,
+                    "risk_score": unit["risk_score"],
+                    "action": "restrict",
+                })
+            node.tags = ",".join(tags)
+
+        logger.info(
+            "Decoy placement optimized: method=%s capacity=%d assigned=%d nodes=%s",
+            method,
+            decoy_capacity,
+            len(result_assignments),
+            sorted(selected_ids),
+        )
+        return {
+            "assignments": result_assignments,
+            "method": method,
+            "fallback_reason": fallback_reason,
+        }
 
     def _generate_explanation(
         self,
         units: List[Dict[str, Any]],
-        qaoa_assignments: List[Dict[str, Any]],
-        qaoa_cost: float,
-        sa_cost: float,
+        assignments: List[Dict[str, Any]],
+        selected_cost: float,
+        sa_cost: Optional[float],
         duration_ms: int,
+        method: str,
+        fallback_reason: Optional[str],
+        decoy_assignments: List[Dict[str, Any]],
     ) -> str:
-        """Produce human-readable justification referencing QUBO cost terms and comparison."""
-        allow_count = sum(1 for a in qaoa_assignments if a["action"] == "allow")
-        restrict_count = sum(1 for a in qaoa_assignments if a["action"] == "restrict")
-        deny_count = sum(1 for a in qaoa_assignments if a["action"] == "deny")
+        """Produce a solver-honest explanation referencing QUBO cost terms."""
+        allow_count = sum(1 for a in assignments if a["action"] == "allow")
+        restrict_count = sum(1 for a in assignments if a["action"] == "restrict")
+        deny_count = sum(1 for a in assignments if a["action"] == "deny")
 
         narratives = []
-        for a in qaoa_assignments:
+        for a in assignments:
             u_name = a["unit"]
             act = a["action"]
             risk = a["risk_score"]
@@ -350,12 +559,16 @@ class QuantumOptimizer:
                 narratives.append(f"{u_name}: Allowed (low breach risk prioritized user friction)")
 
         details = "; ".join(narratives[:3])
+        solver_name = "QAOA (lightning.qubit)" if method == "quantum" else "Classical fallback (neal)"
+        comparison = f"Classical SA={sa_cost:.2f}" if sa_cost is not None else "Classical SA comparison unavailable"
         summary = (
-            f"QAOA (p=3, lightning.qubit) optimized {len(units)} policy units into "
-            f"{allow_count} Allow, {restrict_count} Restrict (Decoy), {deny_count} Deny. "
-            f"Cost: QAOA={qaoa_cost:.2f} vs Classical SA={sa_cost:.2f} ({duration_ms}ms). "
-            f"Dominant factors: {details}."
+            f"{solver_name} optimized {len(units)} policy units into "
+            f"{allow_count} Allow, {restrict_count} Restrict, {deny_count} Deny. "
+            f"Selected cost={selected_cost:.2f}; {comparison} ({duration_ms}ms). "
+            f"Optimized graph decoys={len(decoy_assignments)}. Dominant factors: {details}."
         )
+        if fallback_reason:
+            summary += f" Fallback reason: {fallback_reason}."
         return summary
 
     def optimize(
@@ -368,7 +581,12 @@ class QuantumOptimizer:
         """Run full QAPRE reoptimization: QUBO -> QAOA (PennyLane) + SA baseline -> Policy Update."""
         units = self._extract_policy_units()
         if not units:
-            return OptimizationResult(0, 0, 0, 0, 0, 0, 0, 0, [])
+            return OptimizationResult(
+                0, 0, 0, 0, 0, 0, 0, 0, [],
+                method=None,
+                decoy_assignments=[],
+                qubits=0,
+            )
 
         # Record baseline metrics before optimization
         policies = [u["policy_obj"] for u in units]
@@ -389,39 +607,62 @@ class QuantumOptimizer:
             lambda_capacity=8.0,
             w_risk=10.0,
             w_friction=8.0,
-            w_decoy=2.5,
+            w_decoy=0.5,
         )
 
-        start_wall_clock = time.time()
+        start_wall_clock = time.perf_counter()
+        method = "quantum"
+        fallback_reason = None
+        qaoa_cost: Optional[float] = None
+        qaoa_time = 0.0
+        iters_done = 0
 
-        # 2. Run PennyLane lightning.qubit QAOA
         try:
-            qaoa_bitstring, qaoa_cost, iters_done, qaoa_time, _ = self._solve_qaoa(
+            selected_bitstring, selected_cost, iters_done, qaoa_time, _ = self._solve_qaoa(
                 Q=Q,
                 offset=offset,
                 units=units,
                 p_layers=layers,
                 iterations=min(iterations, 35),
+                decoy_capacity=decoy_capacity,
             )
-        except Exception as e:
-            logger.error("QAOA circuit execution failed on lightning.qubit: %s", e, exc_info=True)
-            raise RuntimeError(f"Quantum circuit execution failed on lightning.qubit: {e}")
+            qaoa_cost = selected_cost
+        except Exception as exc:
+            method = "classical_fallback"
+            fallback_reason = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "QAOA failed; using classical fallback on the same QUBO | reason=%s",
+                fallback_reason,
+            )
+            selected_bitstring, selected_cost, sa_time = self._solve_classical_baseline(
+                qubo_dict=qubo_dict,
+                offset=offset,
+                units=units,
+                num_variables=Q.shape[0],
+            )
+            sa_bitstring, sa_cost = selected_bitstring, selected_cost
+        else:
+            try:
+                sa_bitstring, sa_cost, sa_time = self._solve_classical_baseline(
+                    qubo_dict=qubo_dict,
+                    offset=offset,
+                    units=units,
+                    num_variables=Q.shape[0],
+                )
+            except Exception:
+                logger.exception("Classical SA comparison failed after a successful QAOA run")
+                sa_bitstring, sa_cost, sa_time = [], None, 0.0
 
-        # 3. Run Classical Simulated Annealing baseline on the exact same QUBO
-        sa_bitstring, sa_cost, sa_time = self._solve_classical_baseline(
-            qubo_dict=qubo_dict,
-            offset=offset,
-            units=units,
-        )
+        valid, assignments, action_counts = decode_solution(selected_bitstring, units)
+        if not valid or action_counts["restrict"] > max(0, decoy_capacity):
+            raise RuntimeError(
+                "Selected policy solver returned an infeasible assignment "
+                f"(one_hot={valid}, restrict={action_counts['restrict']}, capacity={decoy_capacity})"
+            )
 
-        total_duration_ms = int((time.time() - start_wall_clock) * 1000)
-
-        # 4. Decode QAOA assignments
-        _, qaoa_assignments, _ = decode_solution(qaoa_bitstring, units)
-
-        # 5. Apply reoptimization back into real Policy models
+        # Apply the selected solver's policy assignments.
         changes: List[Dict[str, Any]] = []
-        for unit, assign in zip(units, qaoa_assignments):
+        for unit, assign in zip(units, assignments):
             policy = unit["policy_obj"]
             old_w = policy.weight
             action = assign["action"]
@@ -455,14 +696,19 @@ class QuantumOptimizer:
             # Record policy change audit log
             self.db.add(PolicyChange(
                 policy_id=policy.id,
-                change_type="quantum_reoptimized",
-                changed_by="QAPRE (PennyLane lightning.qubit)",
+                change_type=("quantum_reoptimized" if method == "quantum" else "classical_fallback_reoptimized"),
+                changed_by=("QAPRE (PennyLane lightning.qubit)" if method == "quantum" else "QAPRE (neal classical fallback)"),
                 old_value=json.dumps({"weight": old_w}),
-                new_value=json.dumps({"weight": policy.weight, "action": action}),
-                reason=f"QAOA selected action={action} (QUBO cost={qaoa_cost:.2f})",
+                new_value=json.dumps({"weight": policy.weight, "action": action, "method": method}),
+                reason=f"{method} selected action={action} (QUBO cost={selected_cost:.2f})",
             ))
 
-        self.db.commit()
+        decoy_result = self._optimize_decoy_placement(
+            decoy_capacity=decoy_capacity,
+            layers=layers,
+            iterations=iterations,
+        )
+        self.db.flush()
 
         # Compute after score
         after_policies = [u["policy_obj"] for u in units]
@@ -475,18 +721,29 @@ class QuantumOptimizer:
             2,
         )
 
-        # 6. Generate human-readable explanation
+        total_duration_ms = int((time.perf_counter() - start_wall_clock) * 1000)
         explanation = self._generate_explanation(
             units=units,
-            qaoa_assignments=qaoa_assignments,
-            qaoa_cost=qaoa_cost,
+            assignments=assignments,
+            selected_cost=selected_cost,
             sa_cost=sa_cost,
             duration_ms=total_duration_ms,
+            method=method,
+            fallback_reason=fallback_reason,
+            decoy_assignments=decoy_result["assignments"],
         )
 
-        # 7. Persist reoptimization record into PolicyImprovement
         record = PolicyImprovement(
-            algorithm=f"QAOA (p={layers}, lightning.qubit) vs SA (neal)",
+            algorithm=(
+                f"QAOA (p={layers}, lightning.qubit) vs SA (neal)"
+                if method == "quantum"
+                else "Classical fallback (neal simulated annealing)"
+            ),
+            method=method,
+            fallback_reason=fallback_reason,
+            decoy_method=decoy_result["method"],
+            decoy_fallback_reason=decoy_result["fallback_reason"],
+            decoy_assignments=json.dumps(decoy_result["assignments"]),
             before_score=before_score,
             after_score=after_score,
             before_fp=round(before_fp, 4),
@@ -511,10 +768,16 @@ class QuantumOptimizer:
             iterations=iters_done,
             duration_ms=total_duration_ms,
             changes=changes,
-            qaoa_cost=round(qaoa_cost, 2),
-            classical_cost=round(sa_cost, 2),
+            qaoa_cost=round(qaoa_cost, 2) if qaoa_cost is not None else None,
+            classical_cost=round(sa_cost, 2) if sa_cost is not None else None,
             classical_duration_ms=int(sa_time * 1000),
-            bitstring="".join(str(b) for b in qaoa_bitstring),
+            bitstring="".join(str(b) for b in selected_bitstring[:3 * len(units)]),
+            method=method,
+            fallback_reason=fallback_reason,
+            decoy_method=decoy_result["method"],
+            decoy_fallback_reason=decoy_result["fallback_reason"],
+            decoy_assignments=decoy_result["assignments"],
+            qubits=Q.shape[0],
         )
 
     def history(self, limit: int = 20) -> List[PolicyImprovement]:

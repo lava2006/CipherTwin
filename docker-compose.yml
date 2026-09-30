@@ -98,7 +98,7 @@ services:
       NEO4J_USER: "neo4j"
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-ciphertwin}
       COWRIE_ENABLED: "true"
-      COWRIE_LOG_PATH: "/data/cowrie/cowrie.json"
+      COWRIE_LOG_PATH: "/data/cowrie/log/cowrie/cowrie.json"
       DECEPTION_MODE: "LIVE"
     volumes:
       - backend-data:/data

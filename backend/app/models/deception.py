@@ -11,6 +11,7 @@ class DecoySession(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     threat_id = Column(Integer, nullable=True, index=True)
     decoy_type = Column(String, nullable=False)  # ssh, database, web, admin_panel, api
+    target_node_id = Column(String, nullable=True, index=True)
     fidelity = Column(String, default="MEDIUM")  # LOW, MEDIUM, HIGH
     reason = Column(String, nullable=True)
     confidence = Column(Float, default=0.85)
@@ -32,11 +33,16 @@ class DecoySession(Base):
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "threat_id": self.threat_id,
             "decoy_type": self.decoy_type,
+            "target_node_id": self.target_node_id,
             "fidelity": self.fidelity or "MEDIUM",
             "persona": self.persona,
             "banner": self.banner,
             "reason": self.reason,
-            "confidence": self.confidence if self.confidence is not None else 0.85,
+            "confidence": (
+                self.confidence
+                if self.confidence is not None
+                else (None if self.mode == "COWRIE" else 0.85)
+            ),
             "mode": self.mode or "SIMULATED",
             "actor": self.actor,
             "source_ip": self.source_ip,

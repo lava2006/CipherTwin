@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.deps import get_current_user
-from app.models.threat import Threat
 from app.models.user import User
 from app.services.threat_intel import ThreatIntel
 
@@ -13,7 +12,7 @@ router = APIRouter(prefix="/api/threats", tags=["threats"])
 
 @router.get("")
 def list_threats(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return [t.to_dict() for t in ThreatIntel(db).list_threats()]
+    return ThreatIntel(db).list_threats()
 
 
 @router.get("/{threat_id}")
@@ -22,6 +21,4 @@ def threat_detail(threat_id: int, db: Session = Depends(get_db),
     t = ThreatIntel(db).get(threat_id)
     if not t:
         raise HTTPException(status_code=404, detail="Not found")
-    payload = t.to_dict()
-    payload["tactics"] = ThreatIntel.tactics_breakdown(t)
-    return payload
+    return t

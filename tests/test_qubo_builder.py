@@ -1,6 +1,7 @@
 """Unit tests for the QUBO builder module."""
 import numpy as np
 import pytest
+from itertools import product
 from app.services.qubo_builder import (
     build_policy_qubo,
     evaluate_solution_cost,
@@ -19,8 +20,8 @@ def test_qubo_matrix_dimensions_and_structure():
     ]
     Q, offset, var_names, qubo_dict = build_policy_qubo(units, decoy_capacity=2)
 
-    assert Q.shape == (9, 9)
-    assert len(var_names) == 9
+    assert Q.shape == (11, 11)
+    assert len(var_names) == 11
     assert np.allclose(Q, np.triu(Q)), "Q matrix must be upper triangular"
     assert offset > 0.0
     assert len(qubo_dict) > 0
@@ -59,6 +60,41 @@ def test_qubo_risk_preference():
     c_allow_h = evaluate_solution_cost([1, 0, 0], Q_high, off_high)
     c_deny_h = evaluate_solution_cost([0, 0, 1], Q_high, off_high)
     assert c_deny_h < c_allow_h, "High risk principal must incur lower cost under Deny"
+
+
+def test_qubo_capacity_is_strict_and_restrict_has_a_cost_region():
+    units = [
+        {"id": "moderate-a", "risk_score": 45.0, "trust_score": 55.0},
+        {"id": "moderate-b", "risk_score": 50.0, "trust_score": 50.0},
+        {"id": "low-a", "risk_score": 10.0, "trust_score": 90.0},
+        {"id": "low-b", "risk_score": 15.0, "trust_score": 85.0},
+    ]
+    capacity = 2
+    Q, offset, _, _ = build_policy_qubo(units, decoy_capacity=capacity)
+
+    best_cost = float("inf")
+    best_restrict_count = None
+    for actions in product(range(3), repeat=len(units)):
+        for slack in product((0, 1), repeat=2):
+            bits = [0] * (3 * len(units))
+            for index, action in enumerate(actions):
+                bits[3 * index + action] = 1
+            bits.extend(slack)
+            cost = evaluate_solution_cost(bits, Q, offset)
+            if cost < best_cost:
+                best_cost = cost
+                best_restrict_count = actions.count(ACTION_RESTRICT)
+
+    assert best_restrict_count == capacity
+
+    moderate_costs = [
+        evaluate_solution_cost([1, 0, 0], Q[:3, :3], offset=0.0),
+        evaluate_solution_cost([0, 1, 0], Q[:3, :3], offset=0.0),
+        evaluate_solution_cost([0, 0, 1], Q[:3, :3], offset=0.0),
+    ]
+    assert moderate_costs[ACTION_RESTRICT] < min(
+        moderate_costs[ACTION_ALLOW], moderate_costs[ACTION_DENY]
+    )
 
 
 def test_decode_solution():

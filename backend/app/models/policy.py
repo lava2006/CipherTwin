@@ -42,6 +42,11 @@ class PolicyImprovement(Base):
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     algorithm = Column(String, default="QAOA-Sim")
+    method = Column(String, nullable=True)
+    fallback_reason = Column(Text, nullable=True)
+    decoy_method = Column(String, nullable=True)
+    decoy_fallback_reason = Column(Text, nullable=True)
+    decoy_assignments = Column(Text, nullable=True)
     before_score = Column(Float, default=0.0)
     after_score = Column(Float, default=0.0)
     before_fp = Column(Float, default=0.0)
@@ -59,6 +64,11 @@ class PolicyImprovement(Base):
             "id": self.id,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "algorithm": self.algorithm,
+            "method": self.method,
+            "fallback_reason": self.fallback_reason,
+            "decoy_method": self.decoy_method,
+            "decoy_fallback_reason": self.decoy_fallback_reason,
+            "decoy_assignments": _json.loads(self.decoy_assignments) if self.decoy_assignments else [],
             "before_score": self.before_score,
             "after_score": self.after_score,
             "before_fp": self.before_fp,

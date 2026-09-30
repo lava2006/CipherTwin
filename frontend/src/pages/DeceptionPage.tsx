@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Eye, Fingerprint, Plus, Shield, Terminal, Webhook, Cpu, CheckCircle2 } from "lucide-react";
 import { usePolling } from "@/hooks/usePolling";
-import type { DecoySession, Honeytoken } from "@/lib/types";
+import type { DecoySession, HoneypotObservation, Honeytoken } from "@/lib/types";
 import { SectionHeader } from "@/components/SectionHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +21,12 @@ const ICONS: Record<string, JSX.Element> = {
 
 interface FidelityStatus {
   mode: string;
+  status: string;
+  cowrie_status: string;
+  log_status: string;
+  log_file: string | null;
+  total_events: number;
+  last_event: string | null;
   cowrie_enabled: boolean;
   total_sessions: number;
   fidelity_breakdown: {
@@ -71,11 +77,11 @@ export default function DeceptionPage() {
     <div className="space-y-6">
       <SectionHeader
         title="Adaptive Deception Engine"
-        description="Dynamic decoys with adaptive fidelity (LOW/MED/HIGH) based on attacker signals, paired with 6-factor honeytokens."
+        description="Cowrie honeypot sessions and observed interaction events, paired with honeytoken controls."
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="font-mono text-xs">
-              Backend: {fed?.mode ?? "SIMULATED"}
+              Backend: {fed?.mode ?? "UNAVAILABLE"}
             </Badge>
             <Button variant="cyber" size="sm" onClick={reseed}>
               <Plus className="mr-1 h-3.5 w-3.5" /> Plant Honeytokens
@@ -89,10 +95,11 @@ export default function DeceptionPage() {
         <Card className="border-border bg-card/40">
           <CardContent className="p-3">
             <div className="text-[10px] uppercase text-muted-foreground">Mode</div>
-            <div className="text-base font-bold text-cyber-cyan">{fed?.mode ?? "SIMULATED"}</div>
+            <div className="text-base font-bold text-cyber-cyan">{fed?.mode ?? "UNAVAILABLE"}</div>
             <div className="text-[11px] text-muted-foreground">
-              {fed?.cowrie_enabled ? "Cowrie Honeypot Active" : "Adaptive Synthetic Emulation"}
+              {fed?.cowrie_status ?? "OFFLINE"} | Log {fed?.log_status ?? "UNAVAILABLE"}
             </div>
+            <div className="text-[11px] text-muted-foreground">{fed?.total_events ?? 0} events | Last: {fed?.last_event ? formatDateTime(fed.last_event) : "None"}</div>
           </CardContent>
         </Card>
         <Card className="border-border bg-card/40">
@@ -106,7 +113,7 @@ export default function DeceptionPage() {
           <CardContent className="p-3">
             <div className="text-[10px] uppercase text-muted-foreground">Medium Fidelity</div>
             <div className="text-base font-bold text-violet-400">{fed?.fidelity_breakdown.medium ?? 0}</div>
-            <div className="text-[11px] text-muted-foreground">Simulated service interaction</div>
+            <div className="text-[11px] text-muted-foreground">Observed Cowrie sessions</div>
           </CardContent>
         </Card>
         <Card className="border-border bg-card/40">
@@ -121,7 +128,7 @@ export default function DeceptionPage() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle>Active Decoy Sessions</CardTitle>
+            <CardTitle>Observed Cowrie Sessions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {sessions.loading && !list.length ? (
@@ -160,7 +167,7 @@ export default function DeceptionPage() {
                         </Badge>
                       </div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {s.persona ? `${s.persona} | ` : ""}Actor: {s.actor ?? "N/A"} | IP: {s.source_ip ?? "N/A"}
+                        Protocol: {observedProtocol(s)} | Username: {s.actor ?? "Not recorded"} | Source IP: {s.source_ip ?? "Not recorded"} | {observedEvents(s).length} events
                       </div>
                     </div>
                     <Badge variant="violet">{formatDateTime(s.timestamp)}</Badge>
@@ -189,9 +196,8 @@ export default function DeceptionPage() {
                   </div>
                   <div className="text-xs mt-1">{active.reason || active.notes}</div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>Fidelity: {active.fidelity || "MEDIUM"}</span>
-                    <span>|</span>
-                    <span>Confidence: {((active.confidence ?? 0.85) * 100).toFixed(0)}%</span>
+                    <span>Fidelity: {active.fidelity || "Not classified"}</span>
+                    {active.confidence != null && <><span>|</span><span>Confidence: {(active.confidence * 100).toFixed(0)}%</span></>}
                   </div>
                 </div>
                 {active.persona && (
@@ -227,10 +233,20 @@ export default function DeceptionPage() {
                     Activity timeline
                   </div>
                   <ul className="space-y-1 text-xs">
-                    {(active.activity ?? []).map((a, i) => (
-                      <li key={i} className="rounded bg-muted/30 px-2 py-1">
-                        {a}
-                      </li>
+                    {(active.activity ?? []).map((event, i) => (
+                      typeof event === "string" ? (
+                        <li key={i} className="rounded bg-muted/30 px-2 py-1">{event}</li>
+                      ) : (
+                        <li key={i} className="rounded bg-muted/30 px-2 py-2">
+                          <div>{formatDateTime(event.timestamp)} | {event.event_type} ({event.event_id})</div>
+                          <div className="text-muted-foreground">
+                            {event.src_ip}{event.src_port != null ? `:${event.src_port}` : ""}{event.dst_ip ? ` to ${event.dst_ip}` : ""}
+                            {event.protocol ? ` | ${event.protocol}` : ""}
+                            {event.dst_port != null ? `:${event.dst_port}` : ""}
+                          </div>
+                          {event.request && <code className="mt-1 block break-all">{event.request}</code>}
+                        </li>
+                      )
                     ))}
                   </ul>
                 </div>
@@ -320,4 +336,12 @@ export default function DeceptionPage() {
       </Card>
     </div>
   );
+}
+
+function observedEvents(session: DecoySession): HoneypotObservation[] {
+  return session.activity.filter((event): event is HoneypotObservation => typeof event !== "string");
+}
+
+function observedProtocol(session: DecoySession): string {
+  return observedEvents(session).find((event) => event.protocol)?.protocol ?? "Not recorded";
 }

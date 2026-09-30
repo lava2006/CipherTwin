@@ -4,15 +4,25 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.deps import get_current_user
+from app.models.deception import DecoySession
 from app.models.user import User
 from app.services.deception import DeceptionEngine
+from app.services.cowrie import cowrie_service
 
 router = APIRouter(prefix="/api/deception", tags=["deception"])
 
 
 @router.get("/sessions")
 def list_sessions(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return [s.to_dict() for s in DeceptionEngine(db).list_sessions()]
+    cowrie_service.ingest_logs_to_db(db)
+    sessions = (
+        db.query(DecoySession)
+        .filter(DecoySession.mode == "COWRIE")
+        .order_by(DecoySession.timestamp.desc())
+        .limit(100)
+        .all()
+    )
+    return [session.to_dict() for session in sessions]
 
 
 @router.get("/honeytokens")
@@ -58,17 +68,23 @@ def cowrie_ingest(db: Session = Depends(get_db), _: User = Depends(get_current_u
 @router.get("/fidelity/status")
 def fidelity_status(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Return deception fidelity and mode breakdown."""
-    from app.core.config import settings
     from app.models.deception import DecoySession
 
-    sessions = db.query(DecoySession).all()
+    health = cowrie_service.check_health()
+    sessions = db.query(DecoySession).filter(DecoySession.mode == "COWRIE").all()
     low = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "LOW")
     med = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "MEDIUM")
     high = sum(1 for s in sessions if (s.fidelity or "MEDIUM").upper() == "HIGH")
 
     return {
-        "mode": settings.deception_mode,
-        "cowrie_enabled": settings.cowrie_enabled,
+        "mode": health.get("mode", "UNAVAILABLE"),
+        "status": health.get("status", "UNAVAILABLE"),
+        "cowrie_status": health.get("cowrie_status", "OFFLINE"),
+        "log_status": health.get("log_status", "UNAVAILABLE"),
+        "log_file": health.get("log_file"),
+        "total_events": health.get("total_events_collected", 0),
+        "last_event": health.get("last_event"),
+        "cowrie_enabled": health.get("status") == "HEALTHY",
         "total_sessions": len(sessions),
         "fidelity_breakdown": {
             "low": low,

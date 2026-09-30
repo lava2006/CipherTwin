@@ -26,9 +26,12 @@ def run_optimization(payload: dict | None = None,
     optimizer = QuantumOptimizer(db)
     result = optimizer.optimize(layers=layers, iterations=iterations)
     log_event(db, action="optimization_run", actor=user.username,
-              target="QAOA",
+              target=f"Policy optimization ({result.method or 'not_run'})",
               details=(f"layers={layers} iters={result.iterations} "
-                       f"score {result.before_score} -> {result.after_score}"),
+                       f"score {result.before_score} -> {result.after_score}; "
+                       f"method={result.method}; fallback_reason={result.fallback_reason}; "
+                       f"decoy_method={result.decoy_method}; "
+                       f"decoy_fallback_reason={result.decoy_fallback_reason}"),
               severity="info")
     return {
         "before_score": result.before_score,
@@ -40,6 +43,14 @@ def run_optimization(payload: dict | None = None,
         "iterations": result.iterations,
         "duration_ms": result.duration_ms,
         "changes": result.changes,
+        "method": result.method,
+        "fallback_reason": result.fallback_reason,
+        "qubits": result.qubits,
+        "qaoa_cost": result.qaoa_cost,
+        "classical_cost": result.classical_cost,
+        "decoy_method": result.decoy_method,
+        "decoy_fallback_reason": result.decoy_fallback_reason,
+        "decoy_assignments": result.decoy_assignments or [],
     }
 
 

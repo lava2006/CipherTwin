@@ -19,6 +19,11 @@ interface OptimizationResult {
   after_fn: number;
   iterations: number;
   duration_ms: number;
+  method: "quantum" | "classical_fallback" | null;
+  fallback_reason: string | null;
+  qubits: number | null;
+  qaoa_cost: number | null;
+  classical_cost: number | null;
   changes: { policy: string; weight_before: number; weight_after: number; delta: number }[];
 }
 
@@ -41,7 +46,13 @@ export default function OptimizationPage() {
     try {
       const res = await api.post<OptimizationResult>("/optimization/run", { layers: 3, iterations: 60 });
       setResult(res.data);
-      toast({ title: "Optimization complete", description: `Score ${res.data.before_score} to ${res.data.after_score}.`, variant: "success" });
+      const title = res.data.method === "quantum"
+        ? "Quantum optimization complete"
+        : res.data.method === "classical_fallback"
+        ? "Classical fallback complete"
+        : "No optimization result";
+      const reason = res.data.fallback_reason ? ` Fallback reason: ${res.data.fallback_reason}` : "";
+      toast({ title, description: `Score ${res.data.before_score} to ${res.data.after_score}.${reason}`, variant: "success" });
     } catch (e) {
       toast({ title: "Optimization failed", variant: "error" });
     } finally {
@@ -80,9 +91,10 @@ export default function OptimizationPage() {
           <Progress value={progress} />
           <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground md:grid-cols-4">
             <span>p-layers: 3</span>
-            <span>qubits: 8 (simulated</span>
-            <span>backend: numpy.linalg</span>
-            <span>noise model: depolarizing-1%</span>
+            <span>qubits: {result?.qubits ?? "QUBO-derived"}</span>
+            <span>backend: {result?.method === "classical_fallback" ? "neal SA fallback" : "PennyLane lightning.qubit"}</span>
+            <span>optimizer: {result?.method === "classical_fallback" ? "simulated annealing" : "Adam"}</span>
+            <span>measurement: 1,000 shots</span>
          </div>
        </CardContent>
      </Card>
@@ -92,6 +104,9 @@ export default function OptimizationPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-emerald-300">
               <Target className="h-5 w-5" />Latest Result
+              <Badge variant={result.method === "quantum" ? "success" : "outline"}>
+                {result.method === "quantum" ? "PennyLane QAOA" : result.method === "classical_fallback" ? "Classical fallback" : "No result"}
+              </Badge>
            </CardTitle>
          </CardHeader>
           <CardContent className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -102,6 +117,13 @@ export default function OptimizationPage() {
          </CardContent>
           <CardContent>
             <div className="text-sm font-semibold">Policy Changes</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              QUBO objective: {result.method === "quantum" ? result.qaoa_cost?.toFixed(3) : result.classical_cost?.toFixed(3)}
+              {result.method === "quantum" ? " (PennyLane)" : " (neal)"}
+            </div>
+            {result.fallback_reason && (
+              <div className="mt-1 text-xs text-amber-300">Fallback reason: {result.fallback_reason}</div>
+            )}
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -172,7 +194,9 @@ export default function OptimizationPage() {
                 <div key={h.id} className="rounded-md border border-border bg-card/40 p-3">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{formatDateTime(h.timestamp)}</span>
-                    <Badge variant="info">{`${h.algorithm}`}</Badge>
+                    <Badge variant="info">
+                      {h.method === "quantum" ? "PennyLane QAOA" : h.method === "classical_fallback" ? "Classical fallback" : h.algorithm}
+                    </Badge>
                  </div>
                   <div className="mt-1 flex items-center gap-2 text-sm">
                     <span className="font-mono">{h.before_score?.toFixed(2)}</span>

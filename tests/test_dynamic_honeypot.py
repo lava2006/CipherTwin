@@ -2,6 +2,7 @@
 import pytest
 from app.db.session import SessionLocal
 from app.models.deception import DecoySession
+from app.seed import init_schema
 from app.services.deception import DeceptionEngine, DECOY_CONFIGURATIONS
 
 
@@ -69,6 +70,7 @@ def test_select_adaptive_decoy_web():
 
 
 def test_open_decoy_persists_persona_and_banner():
+    init_schema()
     db = SessionLocal()
     try:
         engine = DeceptionEngine(db)

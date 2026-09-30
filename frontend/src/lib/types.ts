@@ -102,14 +102,34 @@ export interface Threat {
   actor_name: string;
   username: string | null;
   ip_address: string | null;
-  risk_score: number;
-  severity: "low" | "medium" | "high" | "critical";
   techniques: string[];
   commands: string[];
   first_seen: string | null;
   last_seen: string | null;
   description: string | null;
-  status: "active" | "contained" | "neutralized";
+  status: "observed";
+  event_source: string;
+  event_count: number;
+  session_count: number;
+  protocols: string[];
+  source_ports: Array<string | number>;
+  ports: Array<string | number>;
+  observations: HoneypotObservation[];
+  tactics: Record<string, string[]>;
+  external_intelligence: { status: "not_available"; provider: null };
+}
+
+export interface HoneypotObservation {
+  timestamp: string;
+  event_id: string;
+  event_type: string;
+  src_ip: string;
+  src_port: string | number | null;
+  protocol: string | null;
+  dst_ip: string | null;
+  dst_port: string | number | null;
+  request: string | null;
+  mitre_technique: string | null;
 }
 
 export interface DecoySession {
@@ -121,11 +141,11 @@ export interface DecoySession {
   persona?: string | null;
   banner?: string | null;
   reason?: string | null;
-  confidence?: number;
+  confidence?: number | null;
   mode?: "SIMULATED" | "COWRIE";
   actor: string | null;
   source_ip: string | null;
-  activity: string[];
+  activity: Array<HoneypotObservation | string>;
   commands: string[];
   pages: string[];
   credentials_used: string | null;

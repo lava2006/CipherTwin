@@ -45,6 +45,8 @@ def init_schema():
                 conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN persona VARCHAR"))
             if cols_decoy and "banner" not in cols_decoy:
                 conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN banner TEXT"))
+            if cols_decoy and "target_node_id" not in cols_decoy:
+                conn.execute(text("ALTER TABLE decoy_sessions ADD COLUMN target_node_id VARCHAR"))
 
             # Check honeytokens columns
             res_ht = conn.execute(text("PRAGMA table_info(honeytokens)")).fetchall()
@@ -55,6 +57,21 @@ def init_schema():
                 conn.execute(text("ALTER TABLE honeytokens ADD COLUMN triggered_by VARCHAR"))
             if cols_ht and "alert_severity" not in cols_ht:
                 conn.execute(text("ALTER TABLE honeytokens ADD COLUMN alert_severity VARCHAR DEFAULT 'critical'"))
+
+            res_improvement = conn.execute(text("PRAGMA table_info(policy_improvements)")).fetchall()
+            cols_improvement = [r[1] for r in res_improvement]
+            improvement_columns = {
+                "method": "VARCHAR",
+                "fallback_reason": "TEXT",
+                "decoy_method": "VARCHAR",
+                "decoy_fallback_reason": "TEXT",
+                "decoy_assignments": "TEXT",
+            }
+            for column_name, column_type in improvement_columns.items():
+                if cols_improvement and column_name not in cols_improvement:
+                    conn.execute(text(
+                        f"ALTER TABLE policy_improvements ADD COLUMN {column_name} {column_type}"
+                    ))
 
             conn.commit()
     except Exception as e:

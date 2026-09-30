@@ -1,7 +1,6 @@
 """Cowrie Honeypot Log Ingestion & Normalization Engine for CipherTwin.
 
-Supports both COWRIE mode (ingesting live Cowrie JSON logs) and
-SIMULATED mode (deterministic synthetic attacker emulation).
+Ingests live Cowrie JSON logs into the existing deception session table.
 
 Normalized Events Schema:
 - session_id: str
@@ -16,6 +15,7 @@ Normalized Events Schema:
 import json
 import logging
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
@@ -47,21 +47,31 @@ class CowrieParser:
             return None
 
         eventid = data.get("eventid", "")
-        session_id = data.get("session", "unknown")
-        timestamp = data.get("timestamp", "")
-        src_ip = data.get("src_ip", "0.0.0.0")
+        session_id = data.get("session")
+        timestamp = data.get("timestamp")
+        src_ip = data.get("src_ip")
+        if not eventid or not session_id or not timestamp or not src_ip:
+            return None
+        try:
+            datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
 
         normalized = {
             "session_id": session_id,
             "timestamp": timestamp,
             "src_ip": src_ip,
             "raw_eventid": eventid,
-            "mitre_technique": COWRIE_EVENT_TO_MITRE.get(eventid, "T1021.004"),
+            "mitre_technique": COWRIE_EVENT_TO_MITRE.get(eventid),
+            "protocol": data.get("protocol"),
+            "src_port": data.get("src_port"),
+            "dst_ip": data.get("dst_ip"),
+            "dst_port": data.get("dst_port"),
+            "request": data.get("input") or data.get("url") or data.get("message"),
         }
 
         if eventid == "cowrie.session.connect":
             normalized["event_type"] = "connect"
-            normalized["protocol"] = data.get("protocol", "ssh")
         elif eventid == "cowrie.login.failed":
             normalized["event_type"] = "login_failed"
             normalized["username"] = data.get("username")
@@ -129,36 +139,30 @@ class CowrieService:
         log_path = Path(settings.cowrie_log_path)
         has_logs = log_path.exists()
         events = self.parser.parse_file(str(log_path)) if has_logs else []
-
-        if port_open:
-            return {
-                "status": "HEALTHY",
-                "mode": "COWRIE",
-                "container_running": True,
-                "port": 2222,
-                "banner": banner or "SSH-2.0-OpenSSH_9.2p1 Debian",
-                "log_file": str(log_path) if has_logs else "active_container_stream",
-                "total_events_collected": len(events),
-                "deception_ready": True,
-            }
-
-        if has_logs and len(events) > 0:
-            return {
-                "status": "HEALTHY",
-                "mode": "COWRIE",
-                "log_file": str(log_path),
-                "total_events_collected": len(events),
-            }
+        last_event = max(
+            (event["timestamp"] for event in events),
+            default=None,
+        )
+        status = "HEALTHY" if port_open and has_logs else "DEGRADED" if port_open or has_logs else "UNAVAILABLE"
+        log_status = "AVAILABLE" if has_logs else "UNAVAILABLE"
 
         return {
-            "status": "DEGRADED" if settings.deception_mode == "SIMULATED" else "UNAVAILABLE",
-            "mode": settings.deception_mode,
-            "message": "Cowrie container not running or log file not mounted; running in verified SIMULATED deception mode.",
-            "log_file_present": log_path.exists(),
+            "status": status,
+            "mode": "COWRIE" if port_open else "OFFLINE",
+            "cowrie_status": "RUNNING" if port_open else "OFFLINE",
+            "container_running": port_open,
+            "port": 2222,
+            "banner": banner or None,
+            "log_status": log_status,
+            "log_file": str(log_path) if has_logs else None,
+            "total_events_collected": len(events),
+            "last_event": last_event,
+            "deception_ready": port_open and has_logs,
+            "message": None if port_open else "Cowrie SSH listener is offline.",
         }
 
     def ingest_logs_to_db(self, db, file_path: Optional[str] = None) -> int:
-        """Parse Cowrie logs and ingest into DecoySession records."""
+        """Upsert observed Cowrie sessions into the existing deception log table."""
         path = file_path or settings.cowrie_log_path
         events = self.parser.parse_file(path)
         if not events:
@@ -171,6 +175,12 @@ class CowrieService:
         for ev in events:
             sessions.setdefault(ev["session_id"], []).append(ev)
 
+        existing_sessions = db.query(DecoySession).filter(DecoySession.mode == "COWRIE").all()
+        existing_by_session = {}
+        for record in existing_sessions:
+            if record.notes and record.notes.startswith("Cowrie session ID: "):
+                existing_by_session[record.notes.removeprefix("Cowrie session ID: ")] = record
+
         count = 0
         for sess_id, ev_list in sessions.items():
             cmds = [e["command"] for e in ev_list if e.get("command")]
@@ -180,23 +190,45 @@ class CowrieService:
                 if e.get("username") and e.get("password")
             ]
             first = ev_list[0]
+            observed_events = [
+                {
+                    "timestamp": event["timestamp"],
+                    "event_id": event["raw_eventid"],
+                    "event_type": event["event_type"],
+                    "src_ip": event["src_ip"],
+                    "src_port": event.get("src_port"),
+                    "protocol": event.get("protocol"),
+                    "dst_ip": event.get("dst_ip"),
+                    "dst_port": event.get("dst_port"),
+                    "request": event.get("request"),
+                    "mitre_technique": event.get("mitre_technique"),
+                }
+                for event in ev_list
+            ]
+            timestamp = datetime.fromisoformat(first["timestamp"].replace("Z", "+00:00"))
+            protocol = next((event.get("protocol") for event in ev_list if event.get("protocol")), None)
+            username = next((event.get("username") for event in ev_list if event.get("username")), None)
+            record = existing_by_session.get(sess_id)
+            if record is None:
+                record = DecoySession(mode="COWRIE", decoy_type=protocol or "cowrie")
+                db.add(record)
 
-            record = DecoySession(
-                threat_id=None,
-                decoy_type="ssh",
-                fidelity="HIGH",
-                reason="Ingested from active Cowrie SSH honeypot",
-                confidence=0.95,
-                mode="COWRIE",
-                actor=creds[0].split(":")[0] if creds else "attacker",
-                source_ip=first.get("src_ip", "0.0.0.0"),
-                activity=json.dumps([f"Cowrie event: {e.get('event_type')}" for e in ev_list]),
-                commands=json.dumps(cmds),
-                pages=json.dumps([]),
-                credentials_used=",".join(creds[:5]),
-                notes=f"Cowrie session {sess_id} with {len(ev_list)} recorded events",
-            )
-            db.add(record)
+            record.threat_id = None
+            record.timestamp = timestamp
+            record.decoy_type = protocol or "cowrie"
+            record.fidelity = "HIGH"
+            record.reason = "Observed Cowrie honeypot interaction"
+            record.confidence = None
+            record.mode = "COWRIE"
+            record.actor = username
+            record.source_ip = first["src_ip"]
+            record.activity = json.dumps(observed_events)
+            record.commands = json.dumps(cmds)
+            record.pages = json.dumps([])
+            record.credentials_used = ",".join(creds[:5]) or None
+            record.persona = None
+            record.banner = None
+            record.notes = f"Cowrie session ID: {sess_id}"
             count += 1
 
         db.commit()

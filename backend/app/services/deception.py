@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.deception import DecoySession, Honeytoken
+from app.models.twin import TwinNode
 from app.services.audit import log_event
 
 logger = logging.getLogger("ciphertwin.deception")
@@ -338,7 +339,7 @@ class DeceptionEngine:
         device_trust: Optional[float] = None,
         sensitivity: Optional[str] = None,
     ) -> DecoySession:
-        """Create a decoy session using adaptive signal-driven decision logic."""
+        """Create a decoy session using adaptive signals and QAPRE placements."""
         decision = self.select_adaptive_decoy(
             risk_score=risk_score,
             mitre_technique=mitre_technique,
@@ -347,9 +348,40 @@ class DeceptionEngine:
             sensitivity=sensitivity,
         )
 
+        selected_nodes = [
+            node
+            for node in self.db.query(TwinNode).filter(
+                TwinNode.type.notin_(("user", "honeypot"))
+            ).all()
+            if "optimized_honeypot" in (node.tags or "").split(",")
+        ]
+        compatible_types = {
+            "ssh": {"server", "device", "laptop", "desktop", "tablet"},
+            "database": {"database"},
+            "web": {"application"},
+            "admin_panel": {"server", "application"},
+            "api": {"application", "server"},
+        }
+        compatible_nodes = [
+            node for node in selected_nodes
+            if node.type in compatible_types.get(decision.selected_decoy, set())
+        ]
+        placement_pool = compatible_nodes or selected_nodes
+        target_node = max(
+            placement_pool,
+            key=lambda node: (float(node.risk_score or 0.0), node.id),
+            default=None,
+        )
+        placement_activity = (
+            [f"Routed to QAPRE placement node: {target_node.id} ({target_node.label})"]
+            if target_node
+            else []
+        )
+
         session = DecoySession(
             threat_id=threat_id,
             decoy_type=decision.selected_decoy,
+            target_node_id=target_node.id if target_node else None,
             fidelity=decision.fidelity_level,
             persona=decision.persona,
             banner=decision.banner,
@@ -359,6 +391,7 @@ class DeceptionEngine:
             actor=actor,
             source_ip=source_ip,
             activity=json.dumps([
+                *placement_activity,
                 f"Deployed Persona: {decision.persona}",
                 f"Service Banner: {decision.banner}",
                 f"Connected to {decision.selected_decoy} decoy (fidelity={decision.fidelity_level})",
@@ -367,7 +400,11 @@ class DeceptionEngine:
             commands=json.dumps([]),
             pages=json.dumps([]),
             credentials_used=",".join(FAKE_CREDENTIALS[:2]),
-            notes=f"Persona: {decision.persona} | Banner: {decision.banner} | Auto-redirected: Zero Trust decision='deceive'. {decision.reason}",
+            notes=(
+                f"Persona: {decision.persona} | Banner: {decision.banner} | "
+                f"Auto-redirected: Zero Trust decision='deceive'. {decision.reason}"
+                + (f" QAPRE placement node={target_node.id}." if target_node else " No QAPRE placement was active.")
+            ),
         )
         self.db.add(session)
         self.db.commit()

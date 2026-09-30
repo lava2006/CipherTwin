@@ -89,7 +89,7 @@ export function NetworkGraph({
           const p = positioned[node.id];
           if (!p) return null;
           const isHi = highlightNodeId === node.id;
-          const isHoneypot = node.type === "honeypot" || node.id === "decoy-ssh-01";
+          const isHoneypot = node.type === "honeypot" || node.tags?.includes("optimized_honeypot") || node.id === "decoy-ssh-01";
           const fill = node.status === "compromised" ? "#ef4444" : colorByType[node.type] || "#22d3ee";
           return (
             <g
