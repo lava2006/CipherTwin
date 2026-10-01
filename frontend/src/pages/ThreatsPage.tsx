@@ -16,6 +16,19 @@ export default function ThreatsPage() {
   const list = threats.data ?? [];
   const active = list.find((t) => t.id === selectedId) || list[0];
 
+  function handleExport() {
+    if (!active) return;
+    const content = JSON.stringify(active, null, 2);
+    const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `threat-evidence-${active.ip_address ?? active.id}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -46,12 +59,25 @@ export default function ThreatsPage() {
                         <div className="text-xs text-muted-foreground">{`${t.username ?? "Username not recorded"}`}</div>
                 </div>
               </div>
-                    <Badge variant="info">Observed</Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge variant="info">Observed</Badge>
+                      <Badge
+                        variant={t.severity.label === "Elevated activity" ? "danger" : t.severity.label === "Active probing" ? "warning" : "success"}
+                        title={t.severity.reason}
+                      >
+                        {t.severity.label}
+                      </Badge>
+                    </div>
             </div>
                   <div className="mt-2 flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">{`${t.ip_address ?? "n/a"}`}</span>
                     <span className="font-bold text-cyber-cyan">{`${t.event_count} events`}</span>
             </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {t.techniques.map((technique) => (
+                      <Badge key={technique} variant="violet" className="px-1.5 py-0 font-mono text-[10px]">{technique}</Badge>
+                    ))}
+                  </div>
           </button>
               ))
             )}
@@ -77,6 +103,12 @@ export default function ThreatsPage() {
                     <div className="text-xs text-muted-foreground">{`${active.description}`}</div>
         </div>
                   <div className="ml-auto flex items-center gap-2">
+                    <Badge
+                      variant={active.severity.label === "Elevated activity" ? "danger" : active.severity.label === "Active probing" ? "warning" : "success"}
+                      title={active.severity.reason}
+                    >
+                      {active.severity.label}
+                    </Badge>
                     <Badge variant="info">Observed by honeypot</Badge>
           </div>
         </div>
@@ -86,8 +118,31 @@ export default function ThreatsPage() {
                   <Field label="Source IP" value={`${active.ip_address ?? "N/A"}`} />
                   <Field label="Observed Events" value={`${active.event_count}`} />
                   <Field label="First Seen" value={`${formatDateTime(active.first_seen)}`} />
+                  <Field label="Last Seen" value={`${formatDateTime(active.last_seen)}`} />
+                  <Field label="Observed Span" value={formatDuration(active.duration_seconds)} />
+                  <Field label="Cowrie Sessions" value={`${active.session_count}${active.return_activity ? " · return activity" : ""}`} />
                   <Field label="Protocol / Source → Destination Port" value={`${active.protocols.join(", ") || "Not recorded"} / ${active.source_ports.join(", ") || "Not recorded"} → ${active.ports.join(", ") || "Not recorded"}`} />
         </div>
+
+                <div className="text-xs text-muted-foreground">
+                  Classification rule: {active.severity.reason}
+                  {active.return_activity && " Return activity means distinct Cowrie session IDs were observed for this source IP."}
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Observed Cowrie Sessions</h3>
+                  <div className="space-y-1">
+                    {active.sessions.map((session) => (
+                      <div id={`cowrie-session-${session.id}`} key={session.id} className="rounded border border-border bg-muted/20 p-2 text-xs">
+                        <div className="font-mono">Session {session.session_id ?? session.id}</div>
+                        <div className="text-muted-foreground">
+                          {formatDateTime(session.first_seen)} to {formatDateTime(session.last_seen)} · {session.protocols.join(", ") || "protocol not recorded"}
+                          {session.ports.length ? ` / destination ports ${session.ports.join(", ")}` : " / destination port not recorded"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
                   <div className="font-semibold">External Intelligence: Not Available</div>
@@ -118,11 +173,22 @@ export default function ThreatsPage() {
                 <div>
                   <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Technique Mapping From Observed Events</h3>
                   {active.techniques.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {active.techniques.map((tid) => (
-                        <Badge key={tid} variant="violet" className="font-mono">{`${tid}`}</Badge>
-                      ))}
-            </div>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {active.techniques.map((tid) => (
+                          <Badge key={tid} variant="violet" className="font-mono">{tid}</Badge>
+                        ))}
+                      </div>
+                      <div className="space-y-1">
+                        {active.technique_evidence.map((evidence, index) => (
+                          <div key={`${evidence.technique_id}-${evidence.timestamp}-${index}`} className="rounded border border-border bg-muted/20 p-2 text-xs">
+                            <span className="font-mono text-violet-300">{evidence.technique_id}</span>
+                            <span className="text-muted-foreground"> · {evidence.event_type ?? evidence.event_id} · {formatDateTime(evidence.timestamp)}</span>
+                            {evidence.request && <code className="mt-1 block break-all">Triggering evidence: {evidence.request}</code>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">No techniques correlated</p>
                   )}
@@ -161,10 +227,42 @@ export default function ThreatsPage() {
                   )}
         </div>
 
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Related Activity</h3>
+                  {active.related_activity.length ? (
+                    <div className="space-y-1">
+                      {active.related_activity.map((item, index) => (
+                        <div key={`${item.kind}-${item.actor_id}-${index}`} className="rounded border border-border bg-muted/20 p-2 text-xs">
+                          {item.kind === "same_source_ip_sessions" ? (
+                            <>
+                              <span className="font-mono text-cyber-cyan">{item.actor_ip}</span>
+                              <span className="ml-2 text-muted-foreground">{item.detail}</span>
+                              <div className="mt-1 flex flex-wrap gap-2">
+                                {item.session_ids?.map((sessionId) => (
+                                  <a key={sessionId} className="text-cyan-300 underline" href={`#cowrie-session-${sessionId}`}>
+                                    Open session {sessionId}
+                                  </a>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <button className="text-left" onClick={() => setSelectedId(item.actor_id)} title={`Open observed actor ${item.actor_ip}`}>
+                              <span className="font-mono text-cyber-cyan">{item.actor_ip}</span>
+                              <span className="ml-2 text-muted-foreground">{item.detail}</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No matching observed command, technique, protocol/port, or repeat session found.</p>
+                  )}
+                </div>
+
                 <div className="flex gap-2">
                   <Button size="sm" variant="cyber"><User className="mr-1 h-3.5 w-3.5" />Assign Analyst</Button>
                   <Button size="sm" variant="outline">Mark Contained</Button>
-                  <Button size="sm" variant="outline">Export IOC</Button>
+                  <Button size="sm" variant="outline" onClick={handleExport}>Export IOC</Button>
         </div>
       </div>
             ) : (
@@ -175,6 +273,15 @@ export default function ThreatsPage() {
   </div>
 </div>
   );
+}
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return "Not available";
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  if (minutes < 60) return `${minutes} min ${remainingSeconds} sec`;
+  return `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
 }
 
 function Field({ label, value }: { label: string; value: string }) {

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,7 +15,7 @@ from app.services.cowrie import (
     generate_simulated_cowrie_log,
 )
 from app.services.deception import DeceptionEngine
-from app.services.threat_intel import ThreatIntel
+from app.services.threat_intel import ThreatIntel, classify_observed_severity
 
 
 def test_simulation_mode_generates_cowrie_events_and_deterministic_stats(tmp_path, monkeypatch):
@@ -37,7 +38,7 @@ def test_simulation_mode_generates_cowrie_events_and_deterministic_stats(tmp_pat
     try:
         ingested = CowrieService().ingest_logs_to_db(db, str(log_path))
         assert ingested >= 4
-        records = db.query(DecoySession).filter(DecoySession.mode == "SIMULATED").all()
+        records = db.query(DecoySession).filter(DecoySession.mode == "COWRIE").all()
         assert len(records) >= 4
         fidelities = {record.fidelity for record in records}
         assert fidelities.issubset({"LOW", "MEDIUM", "HIGH"})
@@ -87,6 +88,31 @@ def test_cowrie_log_parser_and_schema_mapping():
     assert p_cmd["session_id"] == "a1b2c3d4"
     assert p_cmd["mitre_technique"] == "T1059"
 
+    credential_read = parser.parse_line(json.dumps({
+        "eventid": "cowrie.command.input",
+        "timestamp": "2026-09-28T12:00:06.000000Z",
+        "src_ip": "198.51.100.42",
+        "session": "a1b2c3d4",
+        "input": "cat /etc/passwd",
+    }))
+    file_download = parser.parse_line(json.dumps({
+        "eventid": "cowrie.session.file_download",
+        "timestamp": "2026-09-28T12:00:07.000000Z",
+        "src_ip": "198.51.100.42",
+        "session": "a1b2c3d4",
+        "url": "http://example.invalid/payload",
+    }))
+    login_success = parser.parse_line(json.dumps({
+        "eventid": "cowrie.login.success",
+        "timestamp": "2026-09-28T12:00:08.000000Z",
+        "src_ip": "198.51.100.42",
+        "session": "a1b2c3d4",
+        "username": "root",
+    }))
+    assert credential_read["mitre_technique"] == "T1059"
+    assert file_download["mitre_technique"] == "T1105"
+    assert login_success["mitre_technique"] == "T1078"
+
 
 def test_cowrie_observations_are_upserted_and_feed_both_pages(tmp_path, monkeypatch):
     engine = create_engine("sqlite:///:memory:")
@@ -117,7 +143,7 @@ def test_cowrie_observations_are_upserted_and_feed_both_pages(tmp_path, monkeypa
             "session": "real-session-1",
             "src_ip": "198.51.100.25",
             "input": "uname -a",
-        },
+            },
     ]
     log_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
     cowrie = CowrieService()
@@ -166,9 +192,14 @@ def test_cowrie_observations_are_upserted_and_feed_both_pages(tmp_path, monkeypa
     assert profile["session_count"] == 1
     assert profile["first_seen"] == "2026-09-30T09:15:00.000000Z"
     assert profile["last_seen"] == "2026-09-30T09:15:04.000000Z"
+    assert profile["duration_seconds"] == 4.0
+    assert profile["severity"]["label"] == "Active probing"
+    assert {item["technique_id"] for item in profile["technique_evidence"]} == {"T1110", "T1059"}
+    assert any(item["request"] == "uname -a" for item in profile["technique_evidence"])
     assert profile["external_intelligence"] == {"status": "not_available", "provider": None}
     assert "risk_score" not in profile
-    assert "severity" not in profile
+    assert profile["severity"]["label"] == "Active probing"
+    assert "uname -a" in profile["severity"]["reason"]
     assert profile["commands"] == ["uname -a"]
 
     from app.api.deception import list_sessions
@@ -199,6 +230,10 @@ def test_cowrie_observations_are_upserted_and_feed_both_pages(tmp_path, monkeypa
     assert threat_response[0]["event_count"] == 4
     assert threat_response[0]["last_seen"] == later_event["timestamp"]
     assert detail_response["external_intelligence"]["status"] == "not_available"
+    assert {
+        "ip_address", "observations", "commands", "techniques", "technique_evidence",
+        "protocols", "source_ports", "ports", "first_seen", "last_seen",
+    }.issubset(detail_response)
     db.close()
 
 
@@ -340,3 +375,90 @@ def test_honeytoken_trigger_lifecycle():
         assert decoy.actor == "attacker_eve"
     finally:
         db.close()
+
+
+def test_observed_severity_classification_rules():
+    recon = classify_observed_severity([
+        {"event_type": "connect", "request": "Connection observed"},
+        {"event_type": "login_failed", "request": "login failed"},
+    ])
+    active = classify_observed_severity([
+        {"event_type": "command_input", "request": "whoami"},
+    ])
+    elevated = classify_observed_severity([
+        {"event_type": "command_input", "request": "cat /etc/passwd"},
+    ])
+
+    assert recon["label"] == "Reconnaissance only"
+    assert active["label"] == "Active probing"
+    assert elevated["label"] == "Elevated activity"
+    assert "Credential file read" in elevated["reason"]
+
+
+def test_threat_profiles_derive_timeline_technique_evidence_and_correlations(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+
+    def add_session(source_ip, session_id, protocol, port, first_seen):
+        first = datetime.fromisoformat(first_seen.replace("Z", "+00:00"))
+        activity = [
+            {
+                "timestamp": first_seen,
+                "event_id": "cowrie.session.connect",
+                "event_type": "connect",
+                "src_ip": source_ip,
+                "src_port": 50000,
+                "protocol": protocol,
+                "dst_ip": "127.0.0.1",
+                "dst_port": port,
+                "request": "connection observed",
+                "mitre_technique": None,
+            },
+            {
+                "timestamp": (first + timedelta(seconds=4)).isoformat().replace("+00:00", "Z"),
+                "event_id": "cowrie.command.input",
+                "event_type": "command_input",
+                "src_ip": source_ip,
+                "src_port": None,
+                "protocol": None,
+                "dst_ip": None,
+                "dst_port": None,
+                "request": "uname -a",
+                "mitre_technique": "T1059",
+            },
+        ]
+        db.add(DecoySession(
+            mode="COWRIE",
+            decoy_type=protocol,
+            source_ip=source_ip,
+            actor="root",
+            timestamp=first,
+            activity=json.dumps(activity),
+            notes=f"Cowrie session ID: {session_id}",
+        ))
+
+    from app.services.cowrie import cowrie_service
+
+    monkeypatch.setattr(cowrie_service, "ingest_logs_to_db", lambda target_db: 0)
+    add_session("198.51.100.31", "return-1", "ssh", 2222, "2026-09-30T10:00:00.000000Z")
+    add_session("198.51.100.31", "return-2", "mysql", 3306, "2026-09-30T10:05:00.000000Z")
+    add_session("198.51.100.32", "other-1", "ssh", 2222, "2026-09-30T10:01:00.000000Z")
+    db.commit()
+
+    profiles = ThreatIntel(db).list_threats()
+    returning = next(profile for profile in profiles if profile["ip_address"] == "198.51.100.31")
+    related = returning["related_activity"]
+
+    assert returning["session_count"] == 2
+    assert returning["return_activity"] is True
+    assert returning["duration_seconds"] == 304.0
+    assert {session["protocols"][0] for session in returning["sessions"]} == {"ssh", "mysql"}
+    assert returning["technique_evidence"][0]["technique_id"] == "T1059"
+    assert returning["technique_evidence"][0]["request"] == "uname -a"
+    assert any(item["kind"] == "same_source_ip_sessions" for item in related)
+    assert any(item["kind"] == "shared_command_pattern" for item in related)
+    assert any(item["kind"] == "shared_technique" for item in related)
+    assert any(item["kind"] == "shared_protocol_port" for item in related)
+    assert returning["external_intelligence"] == {"status": "not_available", "provider": None}
+    db.close()

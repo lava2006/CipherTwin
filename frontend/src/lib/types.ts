@@ -106,6 +106,18 @@ export interface Threat {
   commands: string[];
   first_seen: string | null;
   last_seen: string | null;
+  duration_seconds: number | null;
+  return_activity: boolean;
+  sessions: {
+    id: number;
+    session_id: string | null;
+    first_seen: string | null;
+    last_seen: string | null;
+    protocols: string[];
+    source_ports: Array<string | number>;
+    ports: Array<string | number>;
+  }[];
+  severity: { label: "Reconnaissance only" | "Active probing" | "Elevated activity"; reason: string };
   description: string | null;
   status: "observed";
   event_source: string;
@@ -115,6 +127,20 @@ export interface Threat {
   source_ports: Array<string | number>;
   ports: Array<string | number>;
   observations: HoneypotObservation[];
+  technique_evidence: {
+    technique_id: string;
+    event_id: string | null;
+    event_type: string | null;
+    timestamp: string | null;
+    request: string | null;
+  }[];
+  related_activity: {
+    kind: string;
+    actor_id: number;
+    actor_ip: string;
+    detail: string;
+    session_ids?: number[];
+  }[];
   tactics: Record<string, string[]>;
   external_intelligence: { status: "not_available"; provider: null };
 }

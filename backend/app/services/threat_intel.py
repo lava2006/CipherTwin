@@ -1,5 +1,6 @@
 """Threat intelligence and MITRE ATT&CK correlation."""
 import json
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -24,6 +25,66 @@ EVENT_TO_MITRE = {
     "ssh_attempt": ["T1021.004"],
     "credential_dump": ["T1003"],
 }
+
+_CREDENTIAL_FILE_READ = re.compile(
+    r"(?:^|[;&|]\s*)(?:cat|head|tail|less|more|grep|awk|sed|strings)\b.*"
+    r"(?:/etc/(?:passwd|shadow|gshadow|sudoers)|\.ssh/(?:id_rsa|id_ed25519)|ntds\.dit)",
+    re.IGNORECASE,
+)
+_ELEVATED_COMMAND = re.compile(
+    r"\b(?:sudo|su|chmod|chown|useradd|usermod|passwd|setcap|rm|dd|mkfs|wget)\b",
+    re.IGNORECASE,
+)
+
+
+def classify_observed_severity(observations: List[Dict]) -> Dict[str, str]:
+    """Classify only observed activity using the displayed deterministic rules."""
+    commands = [
+        observation.get("request", "").strip()
+        for observation in observations
+        if observation.get("event_type") == "command_input"
+        and isinstance(observation.get("request"), str)
+        and observation["request"].strip()
+    ]
+
+    for command in commands:
+        if _CREDENTIAL_FILE_READ.search(command):
+            return {
+                "label": "Elevated activity",
+                "reason": f"Credential file read observed: {command}",
+            }
+    for command in commands:
+        match = _ELEVATED_COMMAND.search(command)
+        if match:
+            return {
+                "label": "Elevated activity",
+                "reason": f"Privilege, write, destructive, or file-transfer command observed: {command}",
+            }
+
+    if commands:
+        return {
+            "label": "Active probing",
+            "reason": f"Command observed without a configured elevated-activity pattern: {commands[0]}",
+        }
+    return {
+        "label": "Reconnaissance only",
+        "reason": "Connection/login events observed; no commands recorded.",
+    }
+
+
+def _duration_seconds(first_seen: Optional[str], last_seen: Optional[str]) -> Optional[float]:
+    if not first_seen or not last_seen:
+        return None
+    try:
+        first = datetime.fromisoformat(first_seen.replace("Z", "+00:00"))
+        last = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if first.tzinfo is None:
+        first = first.replace(tzinfo=timezone.utc)
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return max(0.0, (last - first).total_seconds())
 
 
 class ThreatIntel:
@@ -115,13 +176,25 @@ class ThreatIntel:
                 "source_ports": set(),
                 "ports": set(),
                 "session_ids": set(),
+                "sessions": [],
+                "command_set": set(),
+                "protocol_ports": set(),
             })
             profile["id"] = max(profile["id"], session.id)
             profile["username"] = profile["username"] or session.actor
             profile["session_ids"].add(session.id)
             session_time = session.timestamp.isoformat() if session.timestamp else None
+            session_first_seen = None
+            session_last_seen = None
+            session_protocols = set()
+            session_ports = set()
+            session_source_ports = set()
             for observation in observations:
                 observed_at = observation.get("timestamp")
+                if observed_at and (not session_first_seen or observed_at < session_first_seen):
+                    session_first_seen = observed_at
+                if observed_at and (not session_last_seen or observed_at > session_last_seen):
+                    session_last_seen = observed_at
                 if observed_at and (not profile["first_seen"] or observed_at < profile["first_seen"]):
                     profile["first_seen"] = observed_at
                 if observed_at and (not profile["last_seen"] or observed_at > profile["last_seen"]):
@@ -132,19 +205,49 @@ class ThreatIntel:
                 protocol = observation.get("protocol")
                 if protocol:
                     profile["protocols"].add(protocol)
+                    session_protocols.add(protocol)
                 source_port = observation.get("src_port")
                 if source_port is not None:
                     profile["source_ports"].add(source_port)
+                    session_source_ports.add(source_port)
                 port = observation.get("dst_port")
                 if port is not None:
                     profile["ports"].add(port)
+                    session_ports.add(port)
+                    if protocol:
+                        profile["protocol_ports"].add((protocol, port))
                 request = observation.get("request")
                 if observation.get("event_type") == "command_input" and request:
                     profile["commands"].append(request)
+                    profile["command_set"].add(request.strip().casefold())
+                if technique:
+                    profile.setdefault("technique_evidence", []).append({
+                        "technique_id": technique,
+                        "event_id": observation.get("event_id"),
+                        "event_type": observation.get("event_type"),
+                        "timestamp": observed_at,
+                        "request": request,
+                    })
                 profile["observations"].append(observation)
             if not observations and session_time:
                 profile["first_seen"] = profile["first_seen"] or session_time
                 profile["last_seen"] = session_time
+                session_first_seen = session_time
+                session_last_seen = session_time
+            session_id = (
+                session.notes.removeprefix("Cowrie session ID: ")
+                if session.notes and session.notes.startswith("Cowrie session ID: ")
+                else None
+            )
+            profile["sessions"].append({
+                "id": session.id,
+                "session_id": session_id,
+                "first_seen": session_first_seen or session_time,
+                "last_seen": session_last_seen or session_time,
+                "protocols": sorted(session_protocols),
+                "source_ports": sorted(session_source_ports),
+                "ports": sorted(session_ports),
+            })
 
         results = []
         for profile in grouped.values():
@@ -167,6 +270,10 @@ class ThreatIntel:
                 "commands": list(dict.fromkeys(profile["commands"])),
                 "first_seen": profile["first_seen"],
                 "last_seen": profile["last_seen"],
+                "duration_seconds": _duration_seconds(profile["first_seen"], profile["last_seen"]),
+                "return_activity": len(profile["session_ids"]) > 1,
+                "sessions": profile["sessions"],
+                "severity": classify_observed_severity(observations),
                 "description": "Observed by Cowrie honeypot; external intelligence unavailable.",
                 "status": "observed",
                 "event_source": "Cowrie honeypot",
@@ -176,12 +283,54 @@ class ThreatIntel:
                 "source_ports": sorted(profile["source_ports"]),
                 "ports": sorted(profile["ports"]),
                 "observations": observations,
+                "technique_evidence": profile.get("technique_evidence", []),
                 "tactics": tactics,
+                "related_activity": [],
                 "external_intelligence": {
                     "status": "not_available",
                     "provider": None,
                 },
             })
+
+        for profile in grouped.values():
+            related = next(
+                (item for item in results if item["ip_address"] == profile["actor_name"]),
+                None,
+            )
+            if related is None:
+                continue
+            if len(profile["sessions"]) > 1:
+                related["related_activity"].append({
+                    "kind": "same_source_ip_sessions",
+                    "actor_id": related["id"],
+                    "actor_ip": profile["actor_name"],
+                    "detail": "This source IP appears in multiple observed Cowrie sessions.",
+                    "session_ids": [session["id"] for session in profile["sessions"]],
+                })
+            for other in grouped.values():
+                if other is profile:
+                    continue
+                for command in sorted(profile["command_set"] & other["command_set"]):
+                    related["related_activity"].append({
+                        "kind": "shared_command_pattern",
+                        "actor_id": other["id"],
+                        "actor_ip": other["actor_name"],
+                        "detail": f"Both actors ran: {command}",
+                    })
+                for technique in sorted(profile["techniques"] & other["techniques"]):
+                    related["related_activity"].append({
+                        "kind": "shared_technique",
+                        "actor_id": other["id"],
+                        "actor_ip": other["actor_name"],
+                        "detail": f"Both actors have observed technique {technique}",
+                    })
+                for protocol, port in sorted(profile["protocol_ports"] & other["protocol_ports"]):
+                    related["related_activity"].append({
+                        "kind": "shared_protocol_port",
+                        "actor_id": other["id"],
+                        "actor_ip": other["actor_name"],
+                        "detail": f"Both actors connected via {protocol} to destination port {port}",
+                    })
         return sorted(results, key=lambda profile: profile["last_seen"] or "", reverse=True)
 
     def get(self, threat_id: int) -> Optional[Dict]:
