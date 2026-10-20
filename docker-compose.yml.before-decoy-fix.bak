@@ -1,0 +1,168 @@
+networks:
+  ciphertwin-internal:
+    driver: bridge
+  ciphertwin-dmz:
+    driver: bridge
+    internal: true
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ciphertwin-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: ciphertwin-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+      NEO4J_PLUGINS: "[]"
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: ciphertwin-cowrie
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "127.0.0.1:2222:2222"
+      - "127.0.0.1:2223:2223"
+    volumes:
+      - cowrie-var:/cowrie/cowrie-git/var
+    networks:
+      - ciphertwin-dmz
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+      COWRIE_OUTPUT_JSON_ENABLED: "yes"
+
+  decoy-web:
+    image: nginx:1.27-alpine
+    container_name: ciphertwin-decoy-web
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./decoy-web/index.html:/usr/share/nginx/html/index.html:ro
+      - ./decoy-web/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ciphertwin-dmz
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ciphertwin-backend
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "sqlite:////data/ciphertwin.db"
+      ENABLE_SIMULATION: "true"
+      TELEMETRY_INTERVAL_SECONDS: "2.5"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?Set SEED_ADMIN_PASSWORD in .env}
+      SEED_ANALYST_PASSWORD: ${SEED_ANALYST_PASSWORD:?Set SEED_ANALYST_PASSWORD in .env}
+      SEED_SOC_LEAD_PASSWORD: ${SEED_SOC_LEAD_PASSWORD:?Set SEED_SOC_LEAD_PASSWORD in .env}
+      RABBITMQ_ENABLED: "true"
+      RABBITMQ_HOST: "rabbitmq"
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_MGMT_PORT: "15672"
+      NEO4J_ENABLED: "true"
+      NEO4J_URL: "http://neo4j:7474"
+      NEO4J_BOLT_URL: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+      COWRIE_ENABLED: "true"
+      COWRIE_LOG_PATH: "/data/cowrie/log/cowrie/cowrie.json"
+      DECEPTION_MODE: "COWRIE"
+      DECOY_WEB_PUBLIC_URL: "http://127.0.0.1:8081"
+    volumes:
+      - backend-data:/data
+      - cowrie-var:/data/cowrie:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ciphertwin-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:80:80"
+    networks:
+      - ciphertwin-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  backend-data:
+  neo4j-data:
+  neo4j-logs:
+  rabbitmq-data:
+  cowrie-var:

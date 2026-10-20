@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CipherTwin Isolated Decoy</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #101722; color: #e8eef7; }
+    main { width: min(680px, calc(100% - 40px)); padding: 32px; border: 1px solid #334155; border-radius: 18px; background: #182332; }
+    .tag { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #5b2530; color: #ffd5db; font-size: 12px; letter-spacing: .08em; }
+    h1 { margin: 18px 0 8px; font-size: clamp(26px, 4vw, 38px); }
+    p { color: #b9c6d8; line-height: 1.65; }
+    code { color: #a5e2c2; }
+  </style>
+</head>
+<body><main>
+  <span class="tag">ISOLATED DEFENSIVE TEST ENVIRONMENT</span>
+  <h1>CipherTwin Decoy Web Service</h1>
+  <p>This local decoy endpoint is part of a controlled cybersecurity demonstration. Requests that arrive here should be generated only by authorized tests.</p>
+  <p>It is not a production application, and it does not provide access to internal services or real credentials.</p>
+  <p>Session reference: <code id="event">not supplied</code></p>
+</main>
+<script>const p = new URLSearchParams(location.search); document.getElementById('event').textContent = p.get('event_id') || 'not supplied';</script>
+</body></html>

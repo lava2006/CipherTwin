@@ -1,0 +1,1 @@
+{'results': [], 'errors': [{'code': 'Neo.ClientError.Statement.SyntaxError', 'message': 'Invalid input \'RETURN\': expected\n  "("\n  "*"\n  "+"\n  ">"\n  "{"\n  <ARROW_RIGHT_HEAD> (line 1, column 35 (offset: 34))\n"MATCH (n) OPTIONAL MATCH (n)-[r]- RETURN n, labels(n), type(r), properties(r), m LIMIT 2"\n                                   ^'}]}
