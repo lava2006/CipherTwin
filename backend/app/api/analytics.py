@@ -198,6 +198,6 @@ def telemetry_volume(db: Session = Depends(get_db), _: User = Depends(get_curren
 
 
 @router.get("/pipeline-status")
-def pipeline_status(_: User = Depends(get_current_user)):
+def pipeline_status():
     from app.workers.pipeline import status as pipeline_status_fn
     return pipeline_status_fn()

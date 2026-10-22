@@ -226,6 +226,13 @@ class TwinEventsConsumer:
 
                 res = engine.evaluate(event, db)
                 engine.persist(event, res, db)
+
+                # Correlate Threat dynamically
+                try:
+                    ThreatIntel(db).correlate(event, res.risk_score, res.decision)
+                except Exception as ti_err:
+                    logger.warning("Threat correlation failed: %s", ti_err)
+
                 db.commit()
 
             # 2. IAM EVENT (Remote VM SSH / Auth)
@@ -272,6 +279,13 @@ class TwinEventsConsumer:
 
                 res = engine.evaluate(event, db)
                 engine.persist(event, res, db)
+
+                # Correlate Threat dynamically
+                try:
+                    ThreatIntel(db).correlate(event, res.risk_score, res.decision)
+                except Exception as ti_err:
+                    logger.warning("Threat correlation failed: %s", ti_err)
+
                 db.commit()
 
             # 3. EDR EVENT (Remote VM Process Execution)
@@ -309,6 +323,13 @@ class TwinEventsConsumer:
 
                 res = engine.evaluate(event, db)
                 engine.persist(event, res, db)
+
+                # Correlate Threat dynamically
+                try:
+                    ThreatIntel(db).correlate(event, res.risk_score, res.decision)
+                except Exception as ti_err:
+                    logger.warning("Threat correlation failed: %s", ti_err)
+
                 db.commit()
 
             # 4. NETFLOW EVENT
@@ -334,6 +355,13 @@ class TwinEventsConsumer:
 
                 res = engine.evaluate(event, db)
                 engine.persist(event, res, db)
+
+                # Correlate Threat dynamically
+                try:
+                    ThreatIntel(db).correlate(event, res.risk_score, res.decision)
+                except Exception as ti_err:
+                    logger.warning("Threat correlation failed: %s", ti_err)
+
                 db.commit()
 
         except Exception as exc:

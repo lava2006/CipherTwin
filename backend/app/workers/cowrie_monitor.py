@@ -132,8 +132,8 @@ class CowrieMonitor:
                 inode = st.st_ino
                 size = st.st_size
 
-                # Detect rotation or file replacement
-                if self._inode is not None and (inode != self._inode or size < self._offset):
+                # Detect truncation or rotation: only reset offset if file shrank
+                if size < self._offset:
                     self._offset = 0
                 self._inode = inode
 

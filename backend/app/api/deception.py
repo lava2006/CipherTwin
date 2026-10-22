@@ -83,6 +83,7 @@ def route_http_event(event_id: int, db: Session = Depends(get_db),
 @router.get("/sessions")
 def list_sessions(mode: str | None = None, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     from app.core.config import settings
+    cowrie_service.ingest_logs_to_db(db)
     query = db.query(DecoySession)
     if mode is not None:
         if mode.upper() != "ALL":

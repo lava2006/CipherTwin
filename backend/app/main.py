@@ -38,10 +38,17 @@ async def lifespan(app: FastAPI):
     if settings.cowrie_bridge_enabled:
         cowrie_monitor.start()
 
-    # Controlled event engine starts in STOPPED state; user controls it via UI / API
+    # 5. Start continuous attack & telemetry simulation
+    from app.services.event_engine import event_engine
+    if settings.enable_simulation:
+        event_engine.start()
+        logging.info("Continuous dynamic attack and telemetry engine started (1 event/sec).")
+
     yield
 
     # Graceful shutdown
+    if settings.enable_simulation:
+        event_engine.stop()
     twin_consumer.stop()
     if settings.cowrie_bridge_enabled:
         cowrie_monitor.stop()

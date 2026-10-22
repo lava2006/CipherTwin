@@ -371,8 +371,8 @@ class RabbitMQPipeline:
             result = engine.evaluate(event, db)
             decision = engine.persist(event, result, db)
 
-            # Adaptive Deception on risky events
-            if result.risk_score >= settings.deception_risk_threshold:
+            # Threat Intelligence & Adaptive Deception on risky events
+            if result.risk_score >= 45 or result.decision in ("deceive", "deny") or event.status == "failure":
                 intel = ThreatIntel(db)
                 threat = intel.correlate(event, result.risk_score, result.decision)
                 if threat:

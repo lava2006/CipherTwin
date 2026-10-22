@@ -81,7 +81,7 @@ class Neo4jClient:
 
         res: Dict[str, Any]
         try:
-            resp = self._client.get(f"{self.url}/", timeout=2.0)
+            resp = self._client.get(f"{self.url}/", timeout=5.0)
             if resp.status_code == 200:
                 # Test Cypher execution
                 cypher_resp = self.execute_cypher("RETURN 1 AS ping")

