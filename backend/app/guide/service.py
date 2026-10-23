@@ -59,6 +59,10 @@ class GuideService:
     def __init__(self):
         self.chain = LLMProviderChain()
 
+    def get_suggested_questions(self) -> Dict[str, List[str]]:
+        """Return categorized starter questions for all personas."""
+        return CATEGORIZED_SUGGESTIONS
+
     def ask(
         self,
         question: str,
