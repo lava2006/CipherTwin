@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     if settings.cowrie_bridge_enabled:
         cowrie_monitor.start()
 
-    # 5. Start continuous attack & telemetry simulation
+    # 5. Start continuous attack & telemetry feed
     from app.services.event_engine import event_engine
     if settings.enable_simulation:
         event_engine.start()
@@ -59,7 +59,7 @@ app = FastAPI(
     description=(
         "CipherTwin – Autonomous Cyber Defense Framework combining a Digital "
         "Twin, Explainable Zero Trust, Adaptive Deception, Threat "
-        "Intelligence and PennyLane QAOA circuit simulation with a classical fallback."
+        "Intelligence and PennyLane QAOA circuit execution with a classical fallback."
     ),
     version=settings.app_version,
     lifespan=lifespan,

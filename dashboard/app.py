@@ -26,6 +26,9 @@ def api_request(method: str, path: str, token: str | None = None, **kwargs: Any)
 st.title("CipherTwin · Analyst Feedback Console")
 st.caption("Connected to the existing FastAPI backend. Data shown here comes from stored API records.")
 
+st.info("💡 **New to CipherTwin?** Use the sidebar navigation to open **🛡️ CipherGuide Assistant**, take the **🧭 Guided Tour**, or browse the **📖 Glossary**.")
+
+
 if "token" not in st.session_state:
     st.session_state.token = ""
 if "user" not in st.session_state:

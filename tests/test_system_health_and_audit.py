@@ -33,7 +33,7 @@ def test_system_health_all_subsystems_reported():
         db.close()
 
 
-def test_truthful_health_reporting_no_fake_status():
+def test_truthful_health_reporting_no_fabricated_status():
     db = SessionLocal()
     try:
         health = system_health(db)

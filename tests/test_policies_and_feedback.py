@@ -41,10 +41,10 @@ def test_policy_evaluation_and_matching():
         db.close()
 
 
-def test_what_if_policy_simulation_zero_mutation():
+def test_what_if_policy_forecast_zero_mutation():
     db = SessionLocal()
     try:
-        # Count policies before simulation
+        # Count policies before forecast
         p_count_before = db.query(Policy).count()
         policies_before = [p.to_dict() for p in db.query(Policy).all()]
 
@@ -52,7 +52,7 @@ def test_what_if_policy_simulation_zero_mutation():
         recent = db.query(RiskDecision).limit(50).all()
         assert len(recent) > 0
 
-        # Simulate strict policy thresholds: allow < 20, restricted < 40, deceive < 70, deny >= 70
+        # Forecast strict policy thresholds: allow < 20, restricted < 40, deceive < 70, deny >= 70
         th_allow = 20.0
         th_restricted = 40.0
         th_deny = 70.0

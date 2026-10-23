@@ -77,3 +77,8 @@ class PolicySimulateOut(BaseModel):
     changed_decisions: int
     details: List[dict]
     summary: str
+
+
+# Modern Forecast Aliases
+PolicyForecastIn = PolicySimulateIn
+PolicyForecastOut = PolicySimulateOut

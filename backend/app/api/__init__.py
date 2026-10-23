@@ -1,7 +1,7 @@
 """HTTP API routers."""
 from fastapi import APIRouter
 
-from app.api import auth, twin, telemetry, risk, policies, threats, deception, optimization, analytics, audit, users, mitre, system, events, ingest
+from app.api import auth, twin, telemetry, risk, policies, threats, deception, optimization, analytics, audit, users, mitre, system, events, ingest, guide
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -20,3 +20,4 @@ api_router.include_router(mitre.router)
 api_router.include_router(system.router)
 api_router.include_router(ingest.router)
 api_router.include_router(ingest.router, prefix="/api")
+api_router.include_router(guide.router)

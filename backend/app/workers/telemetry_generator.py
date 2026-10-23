@@ -1,4 +1,4 @@
-"""Telemetry simulator.
+"""Telemetry generator.
 
 Produces realistic EDR-style events every few seconds: logins, file access,
 network requests, lateral movement, etc. Most events are benign; a small
@@ -43,7 +43,7 @@ LOCATIONS = [
 ]
 
 
-class TelemetrySimulator:
+class TelemetryGenerator:
     def __init__(self, db: Session):
         self.db = db
         self._cached_users: Optional[List[TwinNode]] = None
@@ -149,3 +149,8 @@ class TelemetrySimulator:
             if ev:
                 out.append(ev)
         return out
+
+
+# Backward-compatible alias
+TelemetrySimulator = TelemetryGenerator
+

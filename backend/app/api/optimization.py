@@ -76,5 +76,5 @@ def history(limit: int = 20, db: Session = Depends(get_db),
 
 @router.get("/scaling-benchmark")
 def scaling_benchmark(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    """Return SciPy vs QAOA scaling benchmark metrics with honest classical simulator disclaimer."""
+    """Return SciPy vs QAOA scaling benchmark metrics with honest classical engine disclaimer."""
     return QuantumOptimizer(db).scaling_benchmark()

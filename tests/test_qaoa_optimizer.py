@@ -163,7 +163,7 @@ def test_option_a_strictly_fails_without_classical_fallback(test_db, monkeypatch
     optimizer = QuantumOptimizer(test_db)
 
     def fail_qaoa(**_kwargs):
-        raise RuntimeError("simulated quantum hardware error")
+        raise RuntimeError("lab environment quantum hardware error")
 
     monkeypatch.setattr(optimizer, "_solve_qaoa", fail_qaoa)
     with pytest.raises(RuntimeError) as exc_info:

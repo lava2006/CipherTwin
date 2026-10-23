@@ -1,4 +1,4 @@
-"""Telemetry events emitted by simulated EDR/agents."""
+"""Telemetry events emitted by EDR and network sensors."""
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.sql import func
 

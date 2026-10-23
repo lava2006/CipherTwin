@@ -1,4 +1,4 @@
-"""Controlled Event Simulator & Telemetry Engine for CipherTwin.
+"""Controlled Event Generator & Telemetry Engine for CipherTwin.
 
 Provides a thread-safe, controllable event generation engine:
 - Explicit START and STOP controls
@@ -19,7 +19,7 @@ import uuid
 from app.db.session import SessionLocal
 from app.models.twin import TwinNode
 from app.services.rabbitmq import rabbitmq_pipeline
-from app.workers.telemetry_simulator import TelemetrySimulator
+from app.workers.telemetry_generator import TelemetryGenerator
 
 logger = logging.getLogger("ciphertwin.event_engine")
 
@@ -163,9 +163,9 @@ class EventEngine:
         """Generate one event and pass it through the full RabbitMQ -> Risk Engine pipeline."""
         db = SessionLocal()
         try:
-            sim = TelemetrySimulator(db)
+            gen = TelemetryGenerator(db)
             force_attack = random.random() < 0.22  # ~22% attack probability for active security monitoring
-            ev = sim.generate_one(force_attack=force_attack)
+            ev = gen.generate_one(force_attack=force_attack)
             if not ev:
                 return None
 

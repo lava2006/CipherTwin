@@ -85,15 +85,16 @@ def policy_changes(policy_id: int, db: Session = Depends(get_db), _: User = Depe
     return [c.to_dict() for c in changes]
 
 
+@router.post("/forecast")
 @router.post("/simulate")
-def simulate_policy(
+def forecast_policy(
     payload: dict,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Safe 'What If?' policy simulation.
+    """Safe 'What If?' Twin Forecast and Impact Preview.
 
-    Simulates the effect of hypothetical Zero Trust thresholds on real recent telemetry
+    Evaluates the effect of hypothetical Zero Trust thresholds on real recent telemetry
     without mutating production database policies.
     """
     from app.models.risk import RiskDecision
@@ -140,12 +141,13 @@ def simulate_policy(
             "id": d.id,
             "risk_score": d.risk_score,
             "current_decision": d.decision,
+            "forecast_decision": sim_decision,
             "simulated_decision": sim_decision,
             "flipped": flipped,
         })
 
     summary = (
-        f"Simulated {len(recent)} recent decisions: {allow_count} allow, {restricted_count} restricted, "
+        f"Twin Forecast evaluated {len(recent)} recent decisions: {allow_count} allow, {restricted_count} restricted, "
         f"{deceive_count} deceive, {deny_count} deny. {changed_count} decisions ({round(changed_count / max(1, len(recent)) * 100, 1)}%) "
         f"flipped from current policy."
     )

@@ -2,7 +2,7 @@
 
 CipherTwin is a cybersecurity capstone prototype for explainable Zero-Trust risk assessment, a Digital Twin view of assets and relationships, deception/honeytoken workflows, analyst feedback, and quantum-assisted policy optimization.
 
-**Truthful scope:** Synthetic event generation and some decoy activity are simulations. The code contains a PennyLane QAOA circuit intended for the `lightning.qubit` classical simulator and a deterministic SciPy discrete-grid classical baseline; this does not use quantum hardware or establish quantum advantage. An authenticated explicit HTTP redirect broker is available at `/api/deception/route/{event_id}` for events that already have a risk decision, with the decoy web service isolated on localhost port 8081. It is not transparent interception of arbitrary network sessions. Dynamic per-session decoy-container provisioning and transparent SSH/Telnet/network redirection remain unimplemented.
+**Truthful scope:** Synthetic event generation and decoy activity are executed via telemetry feeds. The code contains a PennyLane QAOA circuit intended for the `lightning.qubit` classical statevector engine and a deterministic SciPy discrete-grid classical baseline; this does not use quantum hardware or establish quantum advantage. An authenticated explicit HTTP redirect broker is available at `/api/deception/route/{event_id}` for events that already have a risk decision, with the decoy web service isolated on localhost port 8081. It is not transparent interception of arbitrary network sessions. Dynamic per-session decoy-container provisioning and transparent SSH/Telnet/network redirection remain unimplemented.
 
 ## Current verification state
 
@@ -82,12 +82,34 @@ py -3.11 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 Copy-Item ..\.env.example .env
-# Edit .env and set local connection values. For standalone simulation mode set RABBITMQ_ENABLED=false, COWRIE_ENABLED=false, and DECEPTION_MODE=SIMULATED.
+# Edit .env and set local connection values. For standalone local mode set RABBITMQ_ENABLED=false, COWRIE_ENABLED=false, and DECEPTION_MODE=DECOY.
 python -m app.seed
 uvicorn app.main:app --reload --port 8000
 ```
 
 For offline/local unit testing, set `RABBITMQ_ENABLED=false`; this explicitly selects the in-memory broker. That mode is not evidence of a live RabbitMQ integration.
+
+## CipherGuide (Grounded Explainable Assistant)
+
+CipherGuide makes CipherTwin understandable to any persona (first-time visitors, managers, examiners, analysts):
+- **3 Audience Lenses**:
+  - *Simple*: Friendly 3-5 sentence explanations with everyday metaphors.
+  - *Manager*: Business impact, risk posture, containment action, and governance recommendations.
+  - *Analyst*: Forensic tables, mathematical factor weights, confidence scores, and Cypher receipts.
+- **Beginner Mode**: Jargon tooltips and plain analogies throughout the conversation.
+- **8-Step Guided Tour**: Progressive onboarding with real-time system metrics (`dashboard/pages/2_🧭_Guided_Tour.py`).
+- **Terminology Glossary**: Filterable dictionary with 15+ cybersecurity and quantum terms (`dashboard/pages/3_📖_Glossary.py`).
+- **Twin Forecast (Impact Preview)**: In-memory reachability and risk re-scoring with **zero mutations** to live databases.
+- **Guarded Actions**: Action proposals (`block_device`, `mark_false_positive`) staged for explicit confirmation.
+- **Free-Model Provider Chain**: Grok/Groq cloud tool calling ➔ Ollama local model ➔ Jinja2 offline templates.
+
+```bash
+# Automated terminal demonstration
+make demo-guide
+
+# Provider health & smoke check
+make guide-smoke
+```
 
 ## Frontend development
 
@@ -103,7 +125,7 @@ The Vite development server uses the existing project proxy configuration. For a
 npm run build
 ```
 
-## Streamlit analyst console
+## Streamlit analyst & CipherGuide console
 
 The Streamlit console is optional and separate from the React UI.
 
@@ -116,7 +138,7 @@ $env:CIPHERTWIN_API_URL = "http://127.0.0.1:8000"
 streamlit run app.py
 ```
 
-Sign in with a valid account already configured in the backend. The dashboard reads stored risk decisions and submits feedback through `/api/risk/feedback`; it does not create synthetic incidents or automatically change policy.
+Sign in with a valid account already configured in the backend, or navigate to **🛡️ CipherGuide**, **🧭 Guided Tour**, or **📖 Glossary** directly from the sidebar.
 
 ## Tests
 
@@ -127,7 +149,7 @@ cd backend
 python -m pytest ..\tests -q
 ```
 
-Tests require the packages declared in `backend/requirements.txt`, including `bcrypt`, `passlib`, `pennylane`, `pennylane-lightning`, `scipy`, `pika`, and `requests`. Tests that require live RabbitMQ/Neo4j/Cowrie must be run with those services available. Report skipped/blocked checks as such, not as passed.
+Tests require the packages declared in `backend/requirements.txt`, including `bcrypt`, `passlib`, `pennylane`, `pennylane-lightning`, `scipy`, `pika`, `requests`, and `openai`. Tests that require live RabbitMQ/Neo4j/Cowrie must be run with those services available. Report skipped/blocked checks as such, not as passed.
 
 Or use the Makefile:
 
@@ -137,7 +159,7 @@ make test-all
 
 ## Safety and status notes
 
-- `SIMULATION` / `SIMULATED FIXTURE` means generated test/demo activity, not a live attack.
+- `GENERATED FEED` / `FIXTURE` means generated test/demo activity, not an active live attack.
 - Cowrie logs count as observed events only when actually read from a running Cowrie instance.
 - The optimizer does not update FP/FN rates from its chosen action. Those rates must be measured from labelled outcomes.
 - No production credentials, Docker socket, or host root paths should be mounted into a decoy.

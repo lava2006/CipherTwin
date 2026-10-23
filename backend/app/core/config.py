@@ -1,5 +1,6 @@
 """Application configuration."""
 from pathlib import Path
+from typing import List, Optional
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -51,9 +52,10 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost", "http://localhost:80"]
 
-    # Simulation
+    # Telemetry Feed & Generator
     telemetry_interval_seconds: float = 2.5
     enable_simulation: bool = True
+    enable_telemetry_feed: bool = True
 
     # Zero Trust risk thresholds
     risk_threshold_allow: int = 30
@@ -107,7 +109,15 @@ class Settings(BaseSettings):
     cowrie_enabled: bool = False
     cowrie_log_path: str = str(BACKEND_DIR / "data" / "cowrie.json")
     cowrie_bridge_enabled: bool = False
-    deception_mode: str = "SIMULATED"  # SIMULATED | COWRIE
+    deception_mode: str = "DECOY"  # DECOY | COWRIE | STANDALONE
+
+    # CipherGuide Assistant Settings
+    llm_provider_order: str = "xai,ollama,offline"
+    xai_base_url: str = "https://api.x.ai/v1"
+    xai_api_key: Optional[str] = None
+    xai_model: str = "grok-beta"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
 
 
 settings = Settings()

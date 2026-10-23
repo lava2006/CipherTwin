@@ -92,9 +92,9 @@ def test_rabbitmq_retry_and_dlq_routing(monkeypatch):
 
         # Force failure during processing
         from app.services import risk_engine
-        def mock_failing_evaluate(*args, **kwargs):
+        def failing_evaluate(*args, **kwargs):
             raise RuntimeError("Downstream risk engine failure")
-        monkeypatch.setattr(risk_engine.engine, "evaluate", mock_failing_evaluate)
+        monkeypatch.setattr(risk_engine.engine, "evaluate", failing_evaluate)
 
         # Retry 1
         res1 = pipe.process_one(db)
