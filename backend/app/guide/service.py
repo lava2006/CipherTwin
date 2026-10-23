@@ -72,9 +72,29 @@ class GuideService:
         session_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         db: Optional[Session] = None,
+        role: Optional[str] = None,
+        style: Optional[str] = None,
+        page_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Process a conversational question and return a grounded response."""
+        """Process a conversational question and return a grounded response.
+        
+        Incorporates context grounding and persona/style detection.
+        """
+        # Detect any explicit role/style overrides in free‑text
+        from .persona import detect_persona_in_text, ROLES, STYLES
         aud = lens or audience
+        # Detect overrides
+        detected_role, detected_style, changed = detect_persona_in_text(question, aud, aud)
+        if changed:
+            # Free-text explicitly overrode role/style for this turn
+            aud = detected_style
+        else:
+            if role:
+                detected_role = role
+            if style:
+                detected_style = style
+                aud = style
+
         sid = conversation_id or session_id or "default_session"
         history = _SESSION_MEMORY.setdefault(sid, [])
 
@@ -84,55 +104,77 @@ class GuideService:
             db = SessionLocal()
             close_db = True
 
+        # Build grounded context facts block
+        from .context_builder import ContextBuilder
+        ctx_builder = ContextBuilder(db)
+        ctx = ctx_builder.build_context(
+            question,
+            page_context=page_context,
+            role=detected_role,
+            style=detected_style,
+        )
+        facts_block = ctx["facts_block"]
+        # Prepend factual context to the user message for the LLM
+        augmented_question = f"Facts:\n{facts_block}\n\nQuestion: {question}"
+
         try:
-            # Call provider chain
+            # Call provider chain with augmented question
             llm_response = self.chain.call(
-                question=question,
+                question=augmented_question,
                 audience=aud,
                 conversation_history=history,
                 db=db,
                 beginner_mode=beginner_mode,
             )
-
+        except Exception as exc:
+            logger.error("LLM provider chain failed: %s", exc)
+            # Graceful fallback response when LLM unavailable
+            answer_text = "I couldn't reach the language model right now. Here is the grounded information I have."
+            evidence = []
+            confidence = "Medium"
+            provider_used = "offline"
+            provider_label = "Using: Offline Mode"
+        else:
             answer_text = llm_response.get("answer", "")
             evidence = llm_response.get("evidence", [])
             confidence = llm_response.get("confidence", "Medium")
             provider_used = llm_response.get("provider_used", "offline")
             provider_label = llm_response.get("provider_label", "Using: Offline Mode")
 
-            # Detect glossary terms
-            detected_terms = find_terms_in_text(f"{question} {answer_text}")
+        # Detect glossary terms (always safe regardless of LLM success)
+        detected_terms = find_terms_in_text(f"{question} {answer_text}")
 
-            # Determine suggested followups
-            suggested_followups = self._generate_followups(question, evidence)
+        # Determine suggested followups
+        suggested_followups = self._generate_followups(question, evidence)
 
-            # Check for proposed guarded actions
-            proposed_action = self._detect_action_proposal(question, db)
+        # Check for proposed guarded actions
+        proposed_action = self._detect_action_proposal(question, db)
 
-            # Update session memory (rolling 6 messages)
-            history.append({"role": "user", "content": question})
-            history.append({"role": "assistant", "content": answer_text})
-            if len(history) > 6:
-                _SESSION_MEMORY[sid] = history[-6:]
+        # Update session memory (rolling 6 messages)
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer_text})
+        if len(history) > 6:
+            _SESSION_MEMORY[sid] = history[-6:]
 
-            return {
-                "answer": answer_text,
-                "audience": aud,
-                "lens": aud,
-                "confidence": confidence,
-                "evidence": evidence,
-                "glossary_terms": detected_terms[:5],
-                "suggested_followups": suggested_followups,
-                "proposed_action": proposed_action,
-                "pending_action": proposed_action,
-                "provider_used": provider_used,
-                "provider_label": provider_label,
-                "session_id": sid,
-            }
-        finally:
-            if close_db:
-                db.close()
-
+        result = {
+            "answer": answer_text,
+            "audience": aud,
+            "lens": aud,
+            "confidence": confidence,
+            "evidence": evidence,
+            "glossary_terms": detected_terms[:5],
+            "suggested_followups": suggested_followups,
+            "proposed_action": proposed_action,
+            "pending_action": proposed_action,
+            "provider_used": provider_used,
+            "provider_label": provider_label,
+            "role": detected_role,
+            "style": detected_style,
+            "session_id": sid,
+        }
+        if close_db:
+            db.close()
+        return result
     def _generate_followups(self, question: str, evidence: List[Dict[str, Any]]) -> List[str]:
         q = question.lower()
         if "what if" in q or "forecast" in q:

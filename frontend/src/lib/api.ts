@@ -2,7 +2,7 @@ import axios, { AxiosError } from "axios";
 
 export const api = axios.create({
   baseURL: "/api",
-  timeout: 30000,
+  timeout: 90000, // 90s timeout to support local LLM Ollama CPU inference
 });
 
 api.interceptors.request.use((config) => {

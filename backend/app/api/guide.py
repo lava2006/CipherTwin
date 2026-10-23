@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from app.guide.service import get_guide_service, GuideService
 from app.guide.tour import get_tour_step, get_all_tour_steps, TourStep
 from app.guide.glossary import get_glossary_term, get_all_terms, GlossaryTerm
-from app.guide.llm import test_providers_smoke
+from app.guide.llm import test_providers_smoke, LLMProviderChain
 
 router = APIRouter(prefix="/api/guide", tags=["guide"])
 
@@ -27,6 +27,21 @@ class AskRequest(BaseModel):
     lens: str = Field(default="simple", description="Audience lens: simple, manager, or analyst")
     beginner_mode: bool = Field(default=True, description="Whether to include jargon tooltips and analogies")
     conversation_id: Optional[str] = Field(default=None, description="Optional conversation session ID")
+    role: Optional[str] = Field(default=None, description="Role / persona")
+    style: Optional[str] = Field(default=None, description="Response style")
+    page_context: Optional[str] = Field(default=None, description="Active UI page or panel context")
+
+
+class ChatRequest(BaseModel):
+    message: Optional[str] = Field(default=None, description="The user's message")
+    question: Optional[str] = Field(default=None, description="Alternative field for message")
+    role: Optional[str] = Field(default="Beginner/General user", description="Role/Persona")
+    style: Optional[str] = Field(default="Simple Explanation", description="Response style")
+    lens: Optional[str] = Field(default=None, description="Audience lens")
+    beginner_mode: bool = Field(default=True, description="Whether beginner mode is active")
+    conversation_id: Optional[str] = Field(default=None, description="Optional conversation session ID")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Short conversation history")
+    page_context: Optional[str] = Field(default=None, description="Current dashboard page")
 
 
 class ConfirmActionRequest(BaseModel):
@@ -36,6 +51,37 @@ class ConfirmActionRequest(BaseModel):
 
 class ScenarioStartRequest(BaseModel):
     scenario_type: str = Field(default="brute_force_lateral", description="Scenario type to replay")
+
+
+@router.get("/health")
+def guide_health() -> Dict[str, Any]:
+    """Lightweight health check for CipherTwinGuide."""
+    ollama_ok = LLMProviderChain.is_ollama_available()
+    return {
+        "status": "HEALTHY",
+        "guide_online": True,
+        "ollama_connected": ollama_ok,
+        "active_provider": "ollama" if ollama_ok else "offline",
+    }
+
+
+@router.post("/chat")
+def chat_guide(
+    req: ChatRequest,
+    guide: GuideService = Depends(get_guide_service),
+) -> Dict[str, Any]:
+    """CipherTwinGuide Chat endpoint matching multi-persona requirements."""
+    prompt = req.message or req.question or ""
+    lens = req.lens or req.style or "simple"
+    return guide.ask(
+        question=prompt,
+        lens=lens,
+        beginner_mode=req.beginner_mode,
+        conversation_id=req.conversation_id,
+        role=req.role,
+        style=req.style,
+        page_context=req.page_context,
+    )
 
 
 @router.post("/ask")
@@ -49,6 +95,9 @@ def ask_guide(
         lens=req.lens,
         beginner_mode=req.beginner_mode,
         conversation_id=req.conversation_id,
+        role=req.role,
+        style=req.style,
+        page_context=req.page_context,
     )
 
 

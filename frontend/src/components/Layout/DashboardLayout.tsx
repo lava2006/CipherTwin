@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { CipherTwinGuide } from "../CipherTwinGuide";
 
 export function DashboardLayout({ children }: { children?: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -14,6 +15,7 @@ export function DashboardLayout({ children }: { children?: ReactNode }) {
           {children ?? <Outlet />}
        </main>
      </div>
+      <CipherTwinGuide />
    </div>
   );
 }
