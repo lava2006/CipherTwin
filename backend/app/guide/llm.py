@@ -124,6 +124,14 @@ class LLMProviderChain:
         db: Any,
         beginner_mode: bool,
     ) -> Optional[Dict[str, Any]]:
+        import urllib.request
+        ping_url = f"{os.getenv('OLLAMA_BASE_URL', settings.ollama_base_url).rstrip('/')}/api/version"
+        try:
+            urllib.request.urlopen(ping_url, timeout=1.0)
+        except Exception:
+            logger.info("Ollama server not reachable at %s; skipping to next provider", ping_url)
+            return None
+
         from openai import OpenAI
         base_url = f"{os.getenv('OLLAMA_BASE_URL', settings.ollama_base_url).rstrip('/')}/v1"
         model = os.getenv("OLLAMA_MODEL", settings.ollama_model)
